@@ -75,7 +75,7 @@ object TestbookQuestionEngine {
         val masterPool = if (existingVault.isNotEmpty()) {
             existingVault
         } else {
-            SopanPyqVaultSeed.buildInitialVaultQuestions()
+            WbpPyqVaultSeed.buildInitialVaultQuestions()
         }
 
         fun tryAccept(q: QuizQuestion, targetList: MutableList<QuizQuestion>): Boolean {
@@ -105,10 +105,17 @@ object TestbookQuestionEngine {
 
             val candidates = masterPool.filter { q ->
                 val subOk = q.subject.equals(targetSubject, ignoreCase = true)
-                val chapOk = targetChapterId == null || q.chapterId.equals(targetChapterId, ignoreCase = true)
+                val mappedChapId = StructuredQuestionSchema.chapterNameToChapterId(q.subject, q.effectiveChapterName())
+                val chapOk = targetChapterId == null ||
+                    q.chapterId.equals(targetChapterId, ignoreCase = true) ||
+                    q.chapter.equals(targetChapterId, ignoreCase = true) ||
+                    mappedChapId.equals(targetChapterId, ignoreCase = true)
+                val mappedExamFam = if (q.pyqExam.isNotBlank()) StructuredQuestionSchema.pyqExamToExamFamily(q.pyqExam) else q.examFamily
                 val examOk = targetExamFamily == null ||
                     targetExamFamily == "ALL_EXAMS" ||
-                    q.examFamily.equals(targetExamFamily, ignoreCase = true)
+                    q.examFamily.equals(targetExamFamily, ignoreCase = true) ||
+                    mappedExamFam.equals(targetExamFamily, ignoreCase = true) ||
+                    q.pyqExam.equals(targetExamFamily, ignoreCase = true)
                 subOk && chapOk && examOk
             }
 
@@ -202,7 +209,7 @@ object TestbookQuestionEngine {
             finalPaper.addAll(fisherYatesShuffle(mixed))
         } else {
             // Subject-Wise or Chapter-Wise Test
-            val targetSub = subject ?: SopanPyqVaultSeed.sopanChapters
+            val targetSub = subject ?: WbpPyqVaultSeed.wbpChapters
                 .firstOrNull { it.chapterId.equals(chapterId, ignoreCase = true) }?.subject ?: "GK"
             finalPaper.addAll(
                 collectForSection(
@@ -275,7 +282,7 @@ object TestbookQuestionEngine {
         seed: Int
     ): QuizQuestion {
         val sub = subject.uppercase(Locale.ROOT)
-        val subChapters = SopanPyqVaultSeed.getChaptersForSubject(sub)
+        val subChapters = WbpPyqVaultSeed.getChaptersForSubject(sub)
         val chapter = if (chapterId != null) {
             subChapters.firstOrNull { it.chapterId.equals(chapterId, ignoreCase = true) }
                 ?: subChapters[seed % subChapters.size]
@@ -336,7 +343,7 @@ object TestbookQuestionEngine {
     // LAYER A.1: DETERMINISTIC PARAMETRIC GENERATOR FOR ALL 18 MATH CHAPTERS
     // =========================================================================
     private fun generateParametricMathQuestion(
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         seed: Int,
         badge: String,
         family: String
@@ -912,7 +919,7 @@ object TestbookQuestionEngine {
     // LAYER A.2: DETERMINISTIC PARAMETRIC GENERATOR FOR ALL 20 REASONING CHAPTERS
     // =========================================================================
     private fun generateParametricReasoningQuestion(
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         seed: Int,
         badge: String,
         family: String
@@ -1263,7 +1270,7 @@ object TestbookQuestionEngine {
     )
 
     private fun generateParametricGkQuestion(
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         seed: Int,
         badge: String,
         family: String
@@ -1320,7 +1327,7 @@ object TestbookQuestionEngine {
     )
 
     private fun generateParametricEnglishQuestion(
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         seed: Int,
         badge: String,
         family: String

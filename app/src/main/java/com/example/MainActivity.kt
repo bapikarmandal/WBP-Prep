@@ -28,16 +28,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -119,6 +119,15 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
     val seenQuestionIds by wbpViewModel.seenQuestionIds.collectAsStateWithLifecycle()
     val bulkGeneratingTarget by wbpViewModel.bulkGeneratingTarget.collectAsStateWithLifecycle()
     val isImportingPyqBook by wbpViewModel.isImportingPyqBook.collectAsStateWithLifecycle()
+    val scannerCurrentPage by wbpViewModel.scannerCurrentPage.collectAsStateWithLifecycle()
+    val scannerTotalPages by wbpViewModel.scannerTotalPages.collectAsStateWithLifecycle()
+    val scannerAddedCount by wbpViewModel.scannerAddedCount.collectAsStateWithLifecycle()
+    val scannerExtractedCount by wbpViewModel.scannerExtractedCount.collectAsStateWithLifecycle()
+    val scannerStep by wbpViewModel.scannerStep.collectAsStateWithLifecycle()
+    val scannerErrorMessage by wbpViewModel.scannerErrorMessage.collectAsStateWithLifecycle()
+    val scannerVerificationReport by wbpViewModel.scannerVerificationReport.collectAsStateWithLifecycle()
+    val scannerToastMessage by wbpViewModel.scannerToastMessage.collectAsStateWithLifecycle()
+    val isGeneratingExplanation by wbpViewModel.isGeneratingExplanation.collectAsStateWithLifecycle()
 
     val questions by wbpViewModel.questions.collectAsStateWithLifecycle()
     val currentQuestionIndex by wbpViewModel.currentQuestionIndex.collectAsStateWithLifecycle()
@@ -203,7 +212,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                                     BottomNavTab.HOME -> if (isSelected) Icons.Default.Home else Icons.Outlined.Home
                                     BottomNavTab.MOCK_TEST -> Icons.AutoMirrored.Outlined.Assignment
                                     BottomNavTab.AI_TUTOR -> if (isSelected) Icons.Default.AutoAwesome else Icons.Outlined.AutoAwesome
-                                    BottomNavTab.PET_TRACKER -> if (isSelected) Icons.Default.DirectionsRun else Icons.Outlined.DirectionsRun
+                                    BottomNavTab.PET_TRACKER -> if (isSelected) Icons.AutoMirrored.Filled.DirectionsRun else Icons.AutoMirrored.Outlined.DirectionsRun
                                     BottomNavTab.SYLLABUS -> Icons.AutoMirrored.Outlined.MenuBook
                                 }
                                 NavigationBarItem(
@@ -317,6 +326,14 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         seenQuestionIds = seenQuestionIds,
                         bulkGeneratingTarget = bulkGeneratingTarget,
                         isImportingPyqBook = isImportingPyqBook,
+                        scannerCurrentPage = scannerCurrentPage,
+                        scannerTotalPages = scannerTotalPages,
+                        scannerAddedCount = scannerAddedCount,
+                        scannerExtractedCount = scannerExtractedCount,
+                        scannerStep = scannerStep,
+                        scannerErrorMessage = scannerErrorMessage,
+                        scannerVerificationReport = scannerVerificationReport,
+                        scannerToastMessage = scannerToastMessage,
                         getPaletteStatus = { wbpViewModel.getPaletteStatus(it) },
                         onSelectQuestion = { wbpViewModel.goToQuestion(it) },
                         onSelectOption = { qId, opt -> wbpViewModel.selectOmrOption(qId, opt) },
@@ -332,6 +349,42 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         },
                         onImportPyqBookContent = { rawText, base64Doc, docMime, subjectHint ->
                             wbpViewModel.importPyqBookContent(rawText, base64Doc, docMime, subjectHint)
+                        },
+                        onScanSmartBatch = { rawTextOrUrl, attachments, declaredPageCount, subjectHint ->
+                            wbpViewModel.scanAndIngestSmartQuestionsBatch(
+                                rawTextOrUrl = rawTextOrUrl,
+                                attachments = attachments,
+                                declaredPageCount = declaredPageCount,
+                                subjectHint = subjectHint
+                            )
+                        },
+                        onClearScannerToast = { wbpViewModel.clearScannerToastMessage() },
+                        onClearScannerError = { wbpViewModel.clearScannerErrorMessage() },
+                        onNotifyScannerInputLoaded = { wbpViewModel.notifyScannerInputLoaded() },
+                        onUpdateUploadedQuestion = { wbpViewModel.updateUploadedQuestion(it) },
+                        onDeleteUploadedQuestion = { wbpViewModel.deleteUploadedQuestion(it) },
+                        onStartUploadedQuestionsTest = { uploadedList ->
+                            wbpViewModel.startUploadedQuestionsQuiz(uploadedList)
+                        },
+                        isGeneratingExplanation = isGeneratingExplanation,
+                        onSaveManualBatch = { batchList ->
+                            wbpViewModel.saveManualQuestionsBatch(batchList)
+                        },
+                        onExportDatabaseJson = { callback ->
+                            wbpViewModel.exportDatabaseBackupJson(callback)
+                        },
+                        onImportDatabaseJson = { rawJson ->
+                            wbpViewModel.importDatabaseBackupJson(rawJson)
+                        },
+                        onAutoGenerateExplanation = { subject, chapter, questionBn, optionsBn, correctIndex, onResult ->
+                            wbpViewModel.autoGenerateBengaliExplanation(
+                                subject = subject,
+                                chapter = chapter,
+                                questionText = questionBn,
+                                options = optionsBn,
+                                correctIndex = correctIndex,
+                                onResult = onResult
+                            )
                         },
                         onStartChapterTest = { wbpViewModel.startChapterPracticeTest(it) },
                         onStartExamGroupTest = { group, subjectFilter ->
@@ -435,7 +488,7 @@ private fun WbpTopHeader(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: Minimal App Logo & Title
+                // Left: Minimal App Logo & Title (100% English UI)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -455,54 +508,18 @@ private fun WbpTopHeader(
                         }
                     }
                     Text(
-                        text = if (language == AppLanguage.BENGALI) "WBP ও KP প্রস্তুতি" else "WBP & KP Prep",
+                        text = "WBP & KP Prep",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                // Right: Enlarged Touch Targets for বাংলা / EN Pill Toggle + Dark Mode Button
+                // Right: Dark Mode Toggle Button
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Surface(
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .clip(RoundedCornerShape(50))
-                            .clickable { onToggleLanguage() }
-                            .testTag("language_toggle_button"),
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(50))
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Text(
-                                text = "বাংলা",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (language == AppLanguage.BENGALI) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (language == AppLanguage.BENGALI) FontWeight.Bold else FontWeight.Medium
-                            )
-                            Text(
-                                text = "/",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "EN",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (language == AppLanguage.ENGLISH) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (language == AppLanguage.ENGLISH) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-
                     Surface(
                         modifier = Modifier
                             .size(40.dp)

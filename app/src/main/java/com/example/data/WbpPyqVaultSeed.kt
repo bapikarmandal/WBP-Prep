@@ -1,6 +1,6 @@
 package com.example.data
 
-data class SopanChapterInfo(
+data class WbpChapterInfo(
     val chapterId: String,
     val numberCode: String,
     val subject: String, // GK, MATH, REASONING, ENGLISH
@@ -8,10 +8,11 @@ data class SopanChapterInfo(
     val titleBn: String
 ) {
     val id: String get() = chapterId
-    val subtitleBn: String get() = "SOPAN Academy WBP Warrior PYQ • $titleBn ($titleEn)"
+    val subtitleEn: String get() = "WBPRB Official PYQ Vault (2005–Present) • $titleEn"
+    val subtitleBn: String get() = "WBPRB Official PYQ Vault (2005–Present) • $titleBn ($titleEn)"
 }
 
-typealias SopanChapterSpec = SopanChapterInfo
+typealias WbpChapterSpec = WbpChapterInfo
 
 data class WbpExamHistoryGroup(
     val id: String,
@@ -24,10 +25,10 @@ data class WbpExamHistoryGroup(
     val yearsCovered: String get() = yearsBadge
 }
 
-object SopanPyqVaultSeed {
+object WbpPyqVaultSeed {
 
     /**
-     * Supported WBP/KP Exams Filter (2005–Present) from the 4 SOPAN Academy WBP Warrior PYQ Books.
+     * Supported WBP/KP Exams Filter (2005–Present) from the WBPRB Official PYQ Vault (2005–Present).
      */
     val examHistoryGroups: List<WbpExamHistoryGroup> = listOf(
         WbpExamHistoryGroup(
@@ -81,77 +82,165 @@ object SopanPyqVaultSeed {
     )
 
     /**
-     * Exact SOPAN Academy Chapter Structure across GK (7), Math (18), Reasoning (20), and English (8).
+     * Official WBPRB Chapter Structure across GK (8), Math (18), Reasoning (20), and English (9).
      */
-    val sopanChapters: List<SopanChapterInfo> = listOf(
-        // GK Chapters (7 Chapters)
-        SopanChapterInfo("GK_CH_01", "01", "GK", "History", "ইতিহাস (History)"),
-        SopanChapterInfo("GK_CH_02", "02", "GK", "Geography", "ভূগোল (Geography)"),
-        SopanChapterInfo("GK_CH_03", "03", "GK", "Polity", "সংবিধান ও রাষ্ট্রবিজ্ঞান (Polity)"),
-        SopanChapterInfo("GK_CH_04", "04", "GK", "Economy", "অর্থনীতি (Economy)"),
-        SopanChapterInfo("GK_CH_05", "05", "GK", "Science", "সাধারণ বিজ্ঞান (Science)"),
-        SopanChapterInfo("GK_CH_06", "06", "GK", "Static GK", "স্ট্যাটিক জিকে ও লোকসংস্কৃতি (Static GK)"),
-        SopanChapterInfo("GK_CH_07", "07", "GK", "Computer", "কম্পিউটার (Computer)"),
+    val wbpChapters: List<WbpChapterInfo> = listOf(
+        // GK Chapters (8 Chapters)
+        WbpChapterInfo("GK_CH_01", "01", "GK", "History", "ইতিহাস (History)"),
+        WbpChapterInfo("GK_CH_02", "02", "GK", "Geography", "ভূগোল (Geography)"),
+        WbpChapterInfo("GK_CH_06", "03", "GK", "West Bengal Static GK", "স্ট্যাটিক জিকে ও লোকসংস্কৃতি (West Bengal Static GK)"),
+        WbpChapterInfo("GK_CH_03", "04", "GK", "Polity", "সংবিধান ও রাষ্ট্রবিজ্ঞান (Polity)"),
+        WbpChapterInfo("GK_CH_04", "05", "GK", "Economy", "অর্থনীতি (Economy)"),
+        WbpChapterInfo("GK_CH_05", "06", "GK", "General Science", "সাধারণ বিজ্ঞান (General Science)"),
+        WbpChapterInfo("GK_CH_07", "07", "GK", "Computer", "কম্পিউটার (Computer)"),
+        WbpChapterInfo("GK_CH_08", "08", "GK", "Current Affairs", "সাম্প্রতিক ঘটনাপ্রবাহ (Current Affairs)"),
 
         // Math Chapters (18 Chapters)
-        SopanChapterInfo("MATH_CH_01", "01", "MATH", "Percentage (শতকরা)", "শতকরা (Percentage)"),
-        SopanChapterInfo("MATH_CH_02", "02", "MATH", "Ratio & Proportion", "অনুপাত ও সমানুপাত (Ratio & Proportion)"),
-        SopanChapterInfo("MATH_CH_03", "03", "MATH", "Mixture & Alligation", "মিশ্রণ (Mixture & Alligation)"),
-        SopanChapterInfo("MATH_CH_04", "04", "MATH", "Average", "গড় (Average)"),
-        SopanChapterInfo("MATH_CH_05", "05", "MATH", "Age", "পিতা-পুত্রের বয়স (Age Problems)"),
-        SopanChapterInfo("MATH_CH_06", "06", "MATH", "Simple Interest", "সরল সুদ (Simple Interest)"),
-        SopanChapterInfo("MATH_CH_07", "07", "MATH", "Compound Interest", "চক্রবৃদ্ধি সুদ (Compound Interest)"),
-        SopanChapterInfo("MATH_CH_08", "08", "MATH", "Profit & Loss", "লাভ ও ক্ষতি (Profit & Loss)"),
-        SopanChapterInfo("MATH_CH_09", "09", "MATH", "Partnership", "অংশীদারি কারবার (Partnership)"),
-        SopanChapterInfo("MATH_CH_10", "10", "MATH", "Time Speed & Distance", "সময় ও দূরত্ব (Time, Speed & Distance)"),
-        SopanChapterInfo("MATH_CH_11", "11", "MATH", "Boat & Stream", "নৌকা ও স্রোত (Boat & Stream)"),
-        SopanChapterInfo("MATH_CH_12", "12", "MATH", "Time & Work", "সময় ও কার্য (Time & Work)"),
-        SopanChapterInfo("MATH_CH_13", "13", "MATH", "Pipe & Cistern", "নল ও চৌবাচ্চা (Pipe & Cistern)"),
-        SopanChapterInfo("MATH_CH_14", "14", "MATH", "Number System", "সংখ্যা তত্ত্ব (Number System)"),
-        SopanChapterInfo("MATH_CH_15", "15", "MATH", "Simplification", "সরলীকরণ (Simplification)"),
-        SopanChapterInfo("MATH_CH_16", "16", "MATH", "LCM & HCF", "ল.সা.গু ও গ.সা.গু (LCM & HCF)"),
-        SopanChapterInfo("MATH_CH_17", "17", "MATH", "Mensuration", "পরিমিতি (Mensuration 2D & 3D)"),
-        SopanChapterInfo("MATH_CH_18", "18", "MATH", "Geometry", "জ্যামিতি (Geometry)"),
+        WbpChapterInfo("MATH_CH_01", "01", "MATH", "Percentage", "শতকরা (Percentage)"),
+        WbpChapterInfo("MATH_CH_02", "02", "MATH", "Ratio & Proportion", "অনুপাত ও সমানুপাত (Ratio & Proportion)"),
+        WbpChapterInfo("MATH_CH_03", "03", "MATH", "Mixture & Alligation", "মিশ্রণ (Mixture & Alligation)"),
+        WbpChapterInfo("MATH_CH_04", "04", "MATH", "Average", "গড় (Average)"),
+        WbpChapterInfo("MATH_CH_05", "05", "MATH", "Problems on Ages", "পিতা-পুত্রের বয়স (Problems on Ages)"),
+        WbpChapterInfo("MATH_CH_06", "06", "MATH", "Simple Interest", "সরল সুদ (Simple Interest)"),
+        WbpChapterInfo("MATH_CH_07", "07", "MATH", "Compound Interest", "চক্রবৃদ্ধি সুদ (Compound Interest)"),
+        WbpChapterInfo("MATH_CH_08", "08", "MATH", "Profit & Loss", "লাভ ও ক্ষতি (Profit & Loss)"),
+        WbpChapterInfo("MATH_CH_09", "09", "MATH", "Partnership", "অংশীদারি কারবার (Partnership)"),
+        WbpChapterInfo("MATH_CH_10", "10", "MATH", "Time Speed & Distance", "সময় ও দূরত্ব (Time, Speed & Distance)"),
+        WbpChapterInfo("MATH_CH_11", "11", "MATH", "Boat & Stream", "নৌকা ও স্রোত (Boat & Stream)"),
+        WbpChapterInfo("MATH_CH_12", "12", "MATH", "Time & Work", "সময় ও কার্য (Time & Work)"),
+        WbpChapterInfo("MATH_CH_13", "13", "MATH", "Pipe & Cistern", "নল ও চৌবাচ্চা (Pipe & Cistern)"),
+        WbpChapterInfo("MATH_CH_14", "14", "MATH", "Number System", "সংখ্যা তত্ত্ব (Number System)"),
+        WbpChapterInfo("MATH_CH_15", "15", "MATH", "Simplification", "সরলীকরণ (Simplification)"),
+        WbpChapterInfo("MATH_CH_16", "16", "MATH", "LCM & HCF", "ল.সা.গু ও গ.সা.গু (LCM & HCF)"),
+        WbpChapterInfo("MATH_CH_17", "17", "MATH", "Mensuration", "পরিমিতি (Mensuration 2D & 3D)"),
+        WbpChapterInfo("MATH_CH_18", "18", "MATH", "Geometry", "জ্যামিতি (Geometry)"),
 
         // Reasoning Chapters (20 Chapters)
-        SopanChapterInfo("REAS_CH_01", "01", "REASONING", "Series", "সিরিজ (Number & Letter Series)"),
-        SopanChapterInfo("REAS_CH_02", "02", "REASONING", "Classification", "শ্রেণিবিন্যাস / বেমানান নির্ণয় (Classification)"),
-        SopanChapterInfo("REAS_CH_03", "03", "REASONING", "Analogy", "সাদৃশ্য (Analogy)"),
-        SopanChapterInfo("REAS_CH_04", "04", "REASONING", "Coding & Decoding", "কোডিং ও ডিকোডিং (Coding & Decoding)"),
-        SopanChapterInfo("REAS_CH_05", "05", "REASONING", "Missing Number", "লুপ্ত সংখ্যা নির্ণয় (Missing Number)"),
-        SopanChapterInfo("REAS_CH_06", "06", "REASONING", "Direction Test", "দিক নির্ণয় (Direction Test)"),
-        SopanChapterInfo("REAS_CH_07", "07", "REASONING", "Blood Relation", "রক্তের সম্পর্ক (Blood Relation)"),
-        SopanChapterInfo("REAS_CH_08", "08", "REASONING", "Ranking/Order", "ক্রম নির্ণয় (Ranking & Order)"),
-        SopanChapterInfo("REAS_CH_09", "09", "REASONING", "Sitting Arrangement", "বসার ব্যবস্থা (Sitting Arrangement)"),
-        SopanChapterInfo("REAS_CH_10", "10", "REASONING", "Mathematical Operations", "গাণিতিক প্রক্রিয়া (Mathematical Operations)"),
-        SopanChapterInfo("REAS_CH_11", "11", "REASONING", "Clock & Calendar", "ঘড়ি ও ক্যালেন্ডার (Clock & Calendar)"),
-        SopanChapterInfo("REAS_CH_12", "12", "REASONING", "Statement & Conclusion", "বিবৃতি ও সিদ্ধান্ত (Statement & Conclusion)"),
-        SopanChapterInfo("REAS_CH_13", "13", "REASONING", "Letter & Number Problems", "অক্ষর ও সংখ্যা সমস্যা (Letter & Number Problems)"),
-        SopanChapterInfo("REAS_CH_14", "14", "REASONING", "Counting Figure", "চিত্র গণনা (Counting Figures)"),
-        SopanChapterInfo("REAS_CH_15", "15", "REASONING", "Incomplete Figure", "অসম্পূর্ণ চিত্র পূরণ (Incomplete Figure)"),
-        SopanChapterInfo("REAS_CH_16", "16", "REASONING", "Dice", "ছক্কা / ডাইস (Dice & Cube)"),
-        SopanChapterInfo("REAS_CH_17", "17", "REASONING", "Mirror & Water Image", "দর্পণ ও জল প্রতিবিম্ব (Mirror & Water Image)"),
-        SopanChapterInfo("REAS_CH_18", "18", "REASONING", "Paper Cutting/Folding", "কাগজ কাটা ও ভাঁজ (Paper Cutting & Folding)"),
-        SopanChapterInfo("REAS_CH_19", "19", "REASONING", "Non-Verbal Series", "নন-ভার্বাল সিরিজ (Non-Verbal Series)"),
-        SopanChapterInfo("REAS_CH_20", "20", "REASONING", "Venn Diagram", "ভেন ডায়াগ্রাম (Venn Diagram)"),
+        WbpChapterInfo("REAS_CH_01", "01", "REASONING", "Number Series", "সংখ্যা সিরিজ (Number Series)"),
+        WbpChapterInfo("REAS_CH_13", "02", "REASONING", "Letter Series", "অক্ষর সিরিজ (Letter Series)"),
+        WbpChapterInfo("REAS_CH_02", "03", "REASONING", "Classification", "শ্রেণিবিন্যাস / বেমানান নির্ণয় (Classification)"),
+        WbpChapterInfo("REAS_CH_03", "04", "REASONING", "Analogy", "সাদৃশ্য (Analogy)"),
+        WbpChapterInfo("REAS_CH_04", "05", "REASONING", "Coding & Decoding", "কোডিং ও ডিকোডিং (Coding & Decoding)"),
+        WbpChapterInfo("REAS_CH_05", "06", "REASONING", "Missing Number", "লুপ্ত সংখ্যা নির্ণয় (Missing Number)"),
+        WbpChapterInfo("REAS_CH_06", "07", "REASONING", "Direction Test", "দিক নির্ণয় (Direction Test)"),
+        WbpChapterInfo("REAS_CH_07", "08", "REASONING", "Blood Relation", "রক্তের সম্পর্ক (Blood Relation)"),
+        WbpChapterInfo("REAS_CH_08", "09", "REASONING", "Ranking & Order", "ক্রম নির্ণয় (Ranking & Order)"),
+        WbpChapterInfo("REAS_CH_09", "10", "REASONING", "Sitting Arrangement", "বসার ব্যবস্থা (Sitting Arrangement)"),
+        WbpChapterInfo("REAS_CH_10", "11", "REASONING", "Mathematical Operations", "গাণিতিক প্রক্রিয়া (Mathematical Operations)"),
+        WbpChapterInfo("REAS_CH_11", "12", "REASONING", "Clock & Calendar", "ঘড়ি ও ক্যালেন্ডার (Clock & Calendar)"),
+        WbpChapterInfo("REAS_CH_12", "13", "REASONING", "Statement & Conclusion", "বিবৃতি ও সিদ্ধান্ত (Statement & Conclusion)"),
+        WbpChapterInfo("REAS_CH_14", "14", "REASONING", "Counting Figures", "চিত্র গণনা (Counting Figures)"),
+        WbpChapterInfo("REAS_CH_15", "15", "REASONING", "Incomplete Figure", "অসম্পূর্ণ চিত্র পূরণ (Incomplete Figure)"),
+        WbpChapterInfo("REAS_CH_16", "16", "REASONING", "Dice & Cubes", "ছক্কা ও ঘনক (Dice & Cubes)"),
+        WbpChapterInfo("REAS_CH_17", "17", "REASONING", "Mirror & Water Image", "দর্পণ ও জল প্রতিবিম্ব (Mirror & Water Image)"),
+        WbpChapterInfo("REAS_CH_18", "18", "REASONING", "Paper Cutting & Folding", "কাগজ কাটা ও ভাঁজ (Paper Cutting & Folding)"),
+        WbpChapterInfo("REAS_CH_19", "19", "REASONING", "Non-Verbal Series", "নন-ভার্বাল সিরিজ (Non-Verbal Series)"),
+        WbpChapterInfo("REAS_CH_20", "20", "REASONING", "Venn Diagram", "ভেন ডায়াগ্রাম (Venn Diagram)"),
 
-        // English Topics (8 Topics)
-        SopanChapterInfo("ENG_CH_01", "01", "ENGLISH", "Prepositions", "Appropriate Prepositions"),
-        SopanChapterInfo("ENG_CH_02", "02", "ENGLISH", "Phrasal Verbs", "Phrasal Verbs & Group Verbs"),
-        SopanChapterInfo("ENG_CH_03", "03", "ENGLISH", "Synonyms/Antonyms", "Synonyms & Antonyms"),
-        SopanChapterInfo("ENG_CH_04", "04", "ENGLISH", "Idioms & Phrases", "Idioms & Phrases"),
-        SopanChapterInfo("ENG_CH_05", "05", "ENGLISH", "Spotting Errors", "Spotting Errors & Grammar"),
-        SopanChapterInfo("ENG_CH_06", "06", "ENGLISH", "Sentence Rearrangement (PQRS)", "Sentence Rearrangement (PQRS)"),
-        SopanChapterInfo("ENG_CH_07", "07", "ENGLISH", "Correct Spelling", "Correct Spelling"),
-        SopanChapterInfo("ENG_CH_08", "08", "ENGLISH", "Collective Nouns", "Collective Nouns & Articles")
+        // English Topics (9 Topics)
+        WbpChapterInfo("ENG_CH_01", "01", "ENGLISH", "Prepositions", "Appropriate Prepositions"),
+        WbpChapterInfo("ENG_CH_02", "02", "ENGLISH", "Phrasal Verbs", "Phrasal Verbs & Group Verbs"),
+        WbpChapterInfo("ENG_CH_03", "03", "ENGLISH", "Synonyms & Antonyms", "Synonyms & Antonyms"),
+        WbpChapterInfo("ENG_CH_04", "04", "ENGLISH", "Idioms & Phrases", "Idioms & Phrases"),
+        WbpChapterInfo("ENG_CH_05", "05", "ENGLISH", "Spotting Errors", "Spotting Errors & Grammar"),
+        WbpChapterInfo("ENG_CH_06", "06", "ENGLISH", "Sentence Rearrangement (PQRS)", "Sentence Rearrangement (PQRS)"),
+        WbpChapterInfo("ENG_CH_07", "07", "ENGLISH", "Correct Spelling", "Correct Spelling"),
+        WbpChapterInfo("ENG_CH_08", "08", "ENGLISH", "Voice & Narration", "Voice Change & Narration"),
+        WbpChapterInfo("ENG_CH_09", "09", "ENGLISH", "One-Word Substitution", "One-Word Substitution")
     )
 
-    fun getChaptersForSubject(subject: String): List<SopanChapterInfo> =
-        sopanChapters.filter { it.subject.equals(subject, ignoreCase = true) }
+    fun getChaptersForSubject(subject: String): List<WbpChapterInfo> =
+        wbpChapters.filter { it.subject.equals(subject, ignoreCase = true) }
+
+    fun findBestMatchingChapter(subject: String, rawChapterOrText: String): WbpChapterInfo {
+        val normSub = when (subject.uppercase().trim()) {
+            "MATH", "MATHEMATICS" -> "MATH"
+            "REASONING", "GI" -> "REASONING"
+            "ENGLISH" -> "ENGLISH"
+            else -> "GK"
+        }
+        val subList = getChaptersForSubject(normSub).ifEmpty { wbpChapters }
+        val q = rawChapterOrText.trim().lowercase()
+        if (q.isNotBlank()) {
+            subList.firstOrNull {
+                it.chapterId.equals(q, ignoreCase = true) ||
+                    it.titleEn.equals(q, ignoreCase = true)
+            }?.let { return it }
+
+            subList.firstOrNull {
+                q.contains(it.titleEn.lowercase().substringBefore(" (")) ||
+                    it.titleEn.lowercase().contains(q) ||
+                    it.titleBn.lowercase().contains(q)
+            }?.let { return it }
+        }
+        return when (normSub) {
+            "MATH" -> when {
+                q.contains("শতকরা") || q.contains("%") || q.contains("percent") -> subList.first { it.chapterId == "MATH_CH_01" }
+                q.contains("অনুপাত") || q.contains("ratio") -> subList.first { it.chapterId == "MATH_CH_02" }
+                q.contains("মিশ্রণ") || q.contains("mixture") -> subList.first { it.chapterId == "MATH_CH_03" }
+                q.contains("গড়") || q.contains("average") -> subList.first { it.chapterId == "MATH_CH_04" }
+                q.contains("বয়স") || q.contains("age") -> subList.first { it.chapterId == "MATH_CH_05" }
+                q.contains("চক্রবৃদ্ধি") || q.contains("compound") -> subList.first { it.chapterId == "MATH_CH_07" }
+                q.contains("সরল সুদ") || q.contains("সুদ") || q.contains("interest") -> subList.first { it.chapterId == "MATH_CH_06" }
+                q.contains("লাভ") || q.contains("ক্ষতি") || q.contains("profit") || q.contains("loss") -> subList.first { it.chapterId == "MATH_CH_08" }
+                q.contains("অংশীদারি") || q.contains("partner") -> subList.first { it.chapterId == "MATH_CH_09" }
+                q.contains("নৌকা") || q.contains("স্রোত") || q.contains("boat") -> subList.first { it.chapterId == "MATH_CH_11" }
+                q.contains("ট্রেন") || q.contains("দূরত্ব") || q.contains("গতিবেগ") || q.contains("speed") -> subList.first { it.chapterId == "MATH_CH_10" }
+                q.contains("নল") || q.contains("চৌবাচ্চা") || q.contains("pipe") -> subList.first { it.chapterId == "MATH_CH_13" }
+                q.contains("কার্য") || q.contains("দিনে") || q.contains("work") -> subList.first { it.chapterId == "MATH_CH_12" }
+                q.contains("ল.সা.গু") || q.contains("গ.সা.গু") || q.contains("lcm") || q.contains("hcf") -> subList.first { it.chapterId == "MATH_CH_16" }
+                q.contains("ক্ষেত্রফল") || q.contains("পরিসীমা") || q.contains("আয়তক্ষেত্র") || q.contains("mensuration") -> subList.first { it.chapterId == "MATH_CH_17" }
+                q.contains("কোণ") || q.contains("ত্রিভুজ") || q.contains("geometry") -> subList.first { it.chapterId == "MATH_CH_18" }
+                else -> subList.first()
+            }
+            "REASONING" -> when {
+                q.contains("letter series") || q.contains("অক্ষর সিরিজ") -> subList.first { it.chapterId == "REAS_CH_13" }
+                q.contains("non-verbal") || q.contains("নন-ভার্বাল") -> subList.first { it.chapterId == "REAS_CH_19" }
+                q.contains("সিরিজ") || q.contains("series") -> subList.first { it.chapterId == "REAS_CH_01" }
+                q.contains("বেমানান") || q.contains("classification") || q.contains("odd") -> subList.first { it.chapterId == "REAS_CH_02" }
+                q.contains("সাদৃশ্য") || q.contains("analogy") || q.contains("::") -> subList.first { it.chapterId == "REAS_CH_03" }
+                q.contains("কোডিং") || q.contains("সাংকেতিক") || q.contains("coding") -> subList.first { it.chapterId == "REAS_CH_04" }
+                q.contains("লুপ্ত") || q.contains("missing") -> subList.first { it.chapterId == "REAS_CH_05" }
+                q.contains("দিক") || q.contains("উত্তর") || q.contains("দক্ষিণ") || q.contains("direction") -> subList.first { it.chapterId == "REAS_CH_06" }
+                q.contains("রক্ত") || q.contains("সম্পর্ক") || q.contains("blood") -> subList.first { it.chapterId == "REAS_CH_07" }
+                q.contains("ক্রম") || q.contains("সারি") || q.contains("rank") -> subList.first { it.chapterId == "REAS_CH_08" }
+                q.contains("ঘড়ি") || q.contains("ক্যালেন্ডার") || q.contains("clock") || q.contains("calendar") -> subList.first { it.chapterId == "REAS_CH_11" }
+                q.contains("চিত্র গণনা") || q.contains("counting") -> subList.first { it.chapterId == "REAS_CH_14" }
+                q.contains("অসম্পূর্ণ") || q.contains("incomplete") -> subList.first { it.chapterId == "REAS_CH_15" }
+                q.contains("ছক্কা") || q.contains("ডাইস") || q.contains("dice") || q.contains("cube") -> subList.first { it.chapterId == "REAS_CH_16" }
+                q.contains("দর্পণ") || q.contains("জল") || q.contains("mirror") || q.contains("water") -> subList.first { it.chapterId == "REAS_CH_17" }
+                q.contains("কাগজ") || q.contains("paper") || q.contains("folding") -> subList.first { it.chapterId == "REAS_CH_18" }
+                q.contains("ভেন") || q.contains("venn") -> subList.first { it.chapterId == "REAS_CH_20" }
+                else -> subList.first()
+            }
+            "ENGLISH" -> when {
+                q.contains("preposition") -> subList.first { it.chapterId == "ENG_CH_01" }
+                q.contains("phrasal") || q.contains("group verb") -> subList.first { it.chapterId == "ENG_CH_02" }
+                q.contains("synonym") || q.contains("antonym") || q.contains("opposite") -> subList.first { it.chapterId == "ENG_CH_03" }
+                q.contains("idiom") || q.contains("phrase") -> subList.first { it.chapterId == "ENG_CH_04" }
+                q.contains("error") || q.contains("grammar") -> subList.first { it.chapterId == "ENG_CH_05" }
+                q.contains("pqrs") || q.contains("rearrange") -> subList.first { it.chapterId == "ENG_CH_06" }
+                q.contains("spell") -> subList.first { it.chapterId == "ENG_CH_07" }
+                q.contains("voice") || q.contains("narration") || q.contains("passive") -> subList.first { it.chapterId == "ENG_CH_08" }
+                q.contains("one-word") || q.contains("one word") || q.contains("substitution") -> subList.first { it.chapterId == "ENG_CH_09" }
+                else -> subList.first()
+            }
+            else -> when {
+                q.contains("ইতিহাস") || q.contains("যুদ্ধ") || q.contains("নবাব") || q.contains("history") -> subList.first { it.chapterId == "GK_CH_01" }
+                q.contains("নদী") || q.contains("পাহাড়") || q.contains("জেলা") || q.contains("বাঁধ") || q.contains("geography") -> subList.first { it.chapterId == "GK_CH_02" }
+                q.contains("সংবিধান") || q.contains("ধারা") || q.contains("polity") || q.contains("article") -> subList.first { it.chapterId == "GK_CH_03" }
+                q.contains("অর্থনীতি") || q.contains("ব্যাঙ্ক") || q.contains("পঞ্চবার্ষিকী") || q.contains("economy") -> subList.first { it.chapterId == "GK_CH_04" }
+                q.contains("ভিটামিন") || q.contains("বিজ্ঞান") || q.contains("অ্যাসিড") || q.contains("science") -> subList.first { it.chapterId == "GK_CH_05" }
+                q.contains("কম্পিউটার") || q.contains("computer") -> subList.first { it.chapterId == "GK_CH_07" }
+                q.contains("সাম্প্রতিক") || q.contains("current") -> subList.first { it.chapterId == "GK_CH_08" }
+                else -> subList.first { it.chapterId == "GK_CH_06" }
+            }
+        }
+    }
 
     /**
      * Builds the initial seeded Question Vault containing:
-     * 1. All 40 authentic extracted PYQs from the 4 SOPAN Academy WBP Warrior books.
+     * 1. All authentic extracted PYQs from the WBPRB Official PYQ Vault (2005–Present).
      * 2. Additional authentic 2005–Present WBP/KP PYQs across SI, Constable, Lady Constable, Excise, Jail Warder, Fire & Wireless.
      * 3. Programmatic variations for Math & Reasoning so the initial vault starts with 240+ unique questions immediately.
      */
@@ -903,7 +992,7 @@ object SopanPyqVaultSeed {
 
     private fun buildMathVariation(
         seed: Int,
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         badge: String,
         family: String
     ): QuizQuestion {
@@ -1054,7 +1143,7 @@ object SopanPyqVaultSeed {
 
     private fun buildReasoningVariation(
         seed: Int,
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         badge: String,
         family: String
     ): QuizQuestion {
@@ -1167,7 +1256,7 @@ object SopanPyqVaultSeed {
 
     private fun buildGkVariation(
         seed: Int,
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         badge: String,
         family: String
     ): QuizQuestion {
@@ -1234,7 +1323,7 @@ object SopanPyqVaultSeed {
             correctIndex = 1,
             explanationBn = "• ${item.third}",
             explanationEn = item.third,
-            shortcutTrickBn = "SOPAN WBP Warrior GK নোট: সঠিক উত্তর হলো '${item.second[1]}'!",
+            shortcutTrickBn = "WBP & KP Smart Question Bank নোট: সঠিক উত্তর হলো '${item.second[1]}'!",
             examYearTag = badge,
             chapterId = chapter.chapterId,
             examFamily = family
@@ -1243,7 +1332,7 @@ object SopanPyqVaultSeed {
 
     private fun buildEnglishVariation(
         seed: Int,
-        chapter: SopanChapterInfo,
+        chapter: WbpChapterInfo,
         badge: String,
         family: String
     ): QuizQuestion {
@@ -1290,7 +1379,7 @@ object SopanPyqVaultSeed {
             correctIndex = 1,
             explanationBn = "• ${item.third}",
             explanationEn = item.third,
-            shortcutTrickBn = "SOPAN WBP English Rule: Correct answer is '${item.second[1]}'.",
+            shortcutTrickBn = "WBP & KP Smart Question Bank English Rule: Correct answer is '${item.second[1]}'.",
             examYearTag = badge,
             chapterId = chapter.chapterId,
             examFamily = family

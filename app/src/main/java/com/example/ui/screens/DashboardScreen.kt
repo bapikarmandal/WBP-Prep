@@ -285,6 +285,48 @@ fun DashboardScreen(
                             color = Color.White
                         )
                     }
+
+                    // Live WBP & KP Smart Question Bank Counter on Home Dashboard
+                    val totalVaultCount = questionVault.size
+                    val totalUnseenCount = remember(questionVault, seenQuestionIds) {
+                        questionVault.count { it.id !in seenQuestionIds }
+                    }
+                    val gkVaultCount = remember(questionVault) { questionVault.count { it.subject.equals("GK", ignoreCase = true) } }
+                    val mathVaultCount = remember(questionVault) { questionVault.count { it.subject.equals("MATH", ignoreCase = true) } }
+                    val reasVaultCount = remember(questionVault) { questionVault.count { it.subject.equals("REASONING", ignoreCase = true) } }
+                    val engVaultCount = remember(questionVault) { questionVault.count { it.subject.equals("ENGLISH", ignoreCase = true) } }
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_smart_question_bank_counter"),
+                        color = EmeraldSuccess.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, EmeraldSuccess.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = if (isBn)
+                                    "WBP & KP Smart Question Bank • মোট প্রশ্ন: $totalVaultCount (Unseen: $totalUnseenCount)"
+                                else
+                                    "WBP & KP Smart Question Bank • Total: $totalVaultCount Questions (Unseen: $totalUnseenCount)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldSuccess
+                            )
+                            Text(
+                                text = "GK: $gkVaultCount • Math: $mathVaultCount • Reasoning: $reasVaultCount • English: $engVaultCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }

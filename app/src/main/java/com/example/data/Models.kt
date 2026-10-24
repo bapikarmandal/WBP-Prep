@@ -1,5 +1,6 @@
 package com.example.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 enum class AppLanguage(val code: String, val label: String) {
@@ -83,22 +84,180 @@ enum class SubjectCategory(
     )
 }
 
+/**
+ * Exact Structured Question Database Schema:
+ * - `id`: Unique string ID
+ * - `subject`: `'GK' | 'Math' | 'Reasoning' | 'English'`
+ * - `chapter`: Exact chapter name mapped dynamically to the chosen subject
+ * - `is_pyq`: Boolean (`true` or `false`)
+ * - `pyq_exam`: String (e.g., `"WBP Constable Main"`, `"KP Constable Prelims"`, `"WBP SI"`, `"KP SI / Sergeant"`, `"WBP Lady Constable"`, `"Excise / Abgari"`, `"Jail Police Warder"`)
+ * - `pyq_year`: String (`2005` to `2026`)
+ * - `question_bn`: Question text (in Bengali for GK/Math/Reasoning; in English for English subject)
+ * - `question_image`: Optional Base64 compressed image string (specifically unlocked when `subject === 'Reasoning'`)
+ * - `options_bn`: Array of 4 strings `[Option A, Option B, Option C, Option D]`
+ * - `option_images`: Optional array of 4 Base64 compressed image strings `[imgA, imgB, imgC, imgD]` (unlocked when `subject === 'Reasoning'`)
+ * - `correct_index`: Number (`0` for A, `1` for B, `2` for C, `3` for D)
+ * - `explanation_bn`: Step-by-step solution/shortcut in Bengali
+ */
+object StructuredQuestionSchema {
+    val subjects = listOf("GK", "Math", "Reasoning", "English")
+
+    val gkChapters = listOf(
+        "History",
+        "Geography",
+        "West Bengal Static GK",
+        "Polity",
+        "Economy",
+        "General Science",
+        "Computer",
+        "Current Affairs"
+    )
+
+    val mathChapters = listOf(
+        "Percentage",
+        "Ratio & Proportion",
+        "Mixture & Alligation",
+        "Average",
+        "Problems on Ages",
+        "Simple Interest",
+        "Compound Interest",
+        "Profit & Loss",
+        "Partnership",
+        "Time Speed & Distance",
+        "Boat & Stream",
+        "Time & Work",
+        "Pipe & Cistern",
+        "Number System",
+        "Simplification",
+        "LCM & HCF",
+        "Mensuration",
+        "Geometry"
+    )
+
+    val reasoningChapters = listOf(
+        "Number Series",
+        "Letter Series",
+        "Classification",
+        "Analogy",
+        "Coding & Decoding",
+        "Missing Number",
+        "Direction Test",
+        "Blood Relation",
+        "Ranking & Order",
+        "Sitting Arrangement",
+        "Mathematical Operations",
+        "Clock & Calendar",
+        "Statement & Conclusion",
+        "Counting Figures",
+        "Incomplete Figure",
+        "Dice & Cubes",
+        "Mirror & Water Image",
+        "Paper Cutting & Folding",
+        "Non-Verbal Series",
+        "Venn Diagram"
+    )
+
+    val englishChapters = listOf(
+        "Prepositions",
+        "Phrasal Verbs",
+        "Synonyms & Antonyms",
+        "Idioms & Phrases",
+        "Spotting Errors",
+        "Sentence Rearrangement (PQRS)",
+        "Correct Spelling",
+        "Voice & Narration",
+        "One-Word Substitution"
+    )
+
+    val pyqExams = listOf(
+        "WBP Constable Main",
+        "KP Constable Prelims",
+        "WBP SI",
+        "KP SI / Sergeant",
+        "WBP Lady Constable",
+        "Excise / Abgari",
+        "Jail Police Warder"
+    )
+
+    val pyqYears: List<String> = (2026 downTo 2005).map { it.toString() }
+
+    fun chaptersForSubject(subject: String): List<String> {
+        return when (subject.uppercase().trim()) {
+            "MATH" -> mathChapters
+            "REASONING", "GI" -> reasoningChapters
+            "ENGLISH" -> englishChapters
+            else -> gkChapters
+        }
+    }
+
+    fun displaySubjectLabel(subject: String): String {
+        return when (subject.uppercase().trim()) {
+            "MATH" -> "Math"
+            "REASONING", "GI" -> "Reasoning"
+            "ENGLISH" -> "English"
+            else -> "GK"
+        }
+    }
+
+    fun normalizeSubjectCode(subject: String): String {
+        return when (subject.uppercase().trim()) {
+            "MATH", "MATHEMATICS" -> "MATH"
+            "REASONING", "GI" -> "REASONING"
+            "ENGLISH" -> "ENGLISH"
+            else -> "GK"
+        }
+    }
+
+    fun chapterNameToChapterId(subject: String, chapterName: String): String {
+        val matched = WbpPyqVaultSeed.findBestMatchingChapter(subject, chapterName)
+        return matched.chapterId
+    }
+
+    fun pyqExamToExamFamily(pyqExam: String): String {
+        val upper = pyqExam.uppercase()
+        return when {
+            upper.contains("LADY") -> "WBP_LADY_CONSTABLE"
+            upper.contains("KP") && upper.contains("CONSTABLE") -> "KP_CONSTABLE"
+            upper.contains("SI") || upper.contains("SERGEANT") -> "WBP_KP_SI"
+            upper.contains("EXCISE") || upper.contains("ABGARI") -> "EXCISE_ABGARI"
+            upper.contains("JAIL") || upper.contains("WARDER") -> "JAIL_WARDER"
+            upper.contains("WIRELESS") || upper.contains("AGRAGAMI") || upper.contains("FIRE") || upper.contains("NVF") -> "FIRE_WIRELESS_NVF"
+            else -> "WBP_CONSTABLE"
+        }
+    }
+}
+
 @Serializable
 data class QuizQuestion(
     val id: String,
     val subject: String, // GK, MATH, REASONING, ENGLISH
-    val questionEn: String,
+    val questionEn: String = "",
+    @SerialName("question_bn")
     val questionBn: String,
-    val optionsEn: List<String>,
+    val optionsEn: List<String> = emptyList(),
+    @SerialName("options_bn")
     val optionsBn: List<String>,
+    @SerialName("correct_index")
     val correctIndex: Int,
-    val explanationEn: String,
+    val explanationEn: String = "",
+    @SerialName("explanation_bn")
     val explanationBn: String,
     val shortcutTrickBn: String = "",
     val shortcutTrickEn: String = "",
     val examYearTag: String = "",
     val chapterId: String = "",
-    val examFamily: String = ""
+    val examFamily: String = "",
+    val chapter: String = "",
+    @SerialName("is_pyq")
+    val isPyq: Boolean = false,
+    @SerialName("pyq_exam")
+    val pyqExam: String = "",
+    @SerialName("pyq_year")
+    val pyqYear: String = "",
+    @SerialName("question_image")
+    val questionImage: String = "",
+    @SerialName("option_images")
+    val optionImages: List<String> = listOf("", "", "", "")
 ) {
     /**
      * Decouples App UI language from Exam Question language:
@@ -129,7 +288,62 @@ data class QuizQuestion(
     fun displayExplanationBn(): String = explanationBn.ifBlank { explanationEn }
 
     fun displayShortcutBn(): String = shortcutTrickBn.ifBlank { shortcutTrickEn }
+
+    fun effectiveChapterName(): String {
+        if (chapter.isNotBlank()) return chapter
+        if (chapterId.isNotBlank()) {
+            val matched = WbpPyqVaultSeed.wbpChapters.firstOrNull { it.chapterId.equals(chapterId, ignoreCase = true) }
+            if (matched != null) return matched.titleEn
+            if (!chapterId.contains("_")) return chapterId
+        }
+        val fallbackList = StructuredQuestionSchema.chaptersForSubject(subject)
+        return fallbackList.firstOrNull() ?: "General"
+    }
+
+    fun effectiveIsPyq(): Boolean {
+        if (isPyq) return true
+        return pyqExam.isNotBlank() ||
+            (examYearTag.isNotBlank() &&
+                !examYearTag.contains("Expected", ignoreCase = true) &&
+                !examYearTag.contains("Custom", ignoreCase = true) &&
+                !examYearTag.contains("Uploaded", ignoreCase = true))
+    }
+
+    fun effectivePyqBadge(): String {
+        if (isPyq && pyqExam.isNotBlank()) {
+            return if (pyqYear.isNotBlank()) "$pyqExam ($pyqYear)" else pyqExam
+        }
+        return examYearTag
+    }
+
+    fun hasQuestionImage(): Boolean = questionImage.isNotBlank()
+
+    fun optionImageAt(index: Int): String = optionImages.getOrNull(index)?.trim().orEmpty()
+
+    fun hasOptionImage(index: Int): Boolean = optionImageAt(index).isNotBlank()
+
+    val isUserUploaded: Boolean
+        get() = id.startsWith("MANUAL_", ignoreCase = true) ||
+            id.startsWith("SMART_SCAN_", ignoreCase = true) ||
+            id.startsWith("UPLOADED_", ignoreCase = true) ||
+            examFamily.contains("USER_UPLOADED", ignoreCase = true) ||
+            examFamily.contains("MANUAL_STUDIO", ignoreCase = true) ||
+            examYearTag.contains("Uploaded", ignoreCase = true) ||
+            examYearTag.contains("Scanned", ignoreCase = true)
 }
+
+data class ScanVerificationReport(
+    val beforeScanTotal: Int,
+    val extractedTotalCount: Int,
+    val newlyAddedCount: Int,
+    val duplicatesIgnoredCount: Int,
+    val afterScanTotal: Int,
+    val subjectBreakdown: Map<String, Int>,
+    val extractedQuestions: List<QuizQuestion>,
+    val newlyAddedIds: Set<String> = emptySet(),
+    val duplicateIds: Set<String> = emptySet(),
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 enum class QuestionPaletteStatus {
     NOT_VISITED,
@@ -140,12 +354,13 @@ enum class QuestionPaletteStatus {
 }
 
 enum class TestSeriesFilter(val id: String, val labelEn: String, val labelBn: String) {
-    ALL("ALL", "All Tests", "সব টেস্ট (All)"),
-    FULL_MOCK("FULL_MOCK", "Full Mock (85M)", "ফুল মক (85M)"),
-    SUBJECT_WISE("SUBJECT_WISE", "Subject-Wise", "বিষয়ভিত্তিক (Subject-Wise)"),
-    PYQ_VAULT("PYQ_VAULT", "PYQ Vault (2005–Present)", "PYQ ভল্ট (২০০৫–বর্তমান)"),
-    CHAPTER_WISE("CHAPTER_WISE", "Chapter-Wise Practice", "অধ্যায়ভিত্তিক (Chapter-Wise)"),
-    MISTAKE_RETRY("MISTAKE_RETRY", "Mistake Retry", "ভুল রি-টেস্ট (Mistake Retry)")
+    ALL("ALL", "All Tests", "All Tests"),
+    MY_UPLOADED("MY_UPLOADED", "🗂️ Manage Question Database", "🗂️ Manage Question Database"),
+    FULL_MOCK("FULL_MOCK", "Full Mock (85M)", "Full Mock (85M)"),
+    SUBJECT_WISE("SUBJECT_WISE", "Subject-Wise", "Subject-Wise"),
+    PYQ_VAULT("PYQ_VAULT", "PYQ Vault (2005–Present)", "PYQ Vault (2005–Present)"),
+    CHAPTER_WISE("CHAPTER_WISE", "Chapter-Wise Practice", "Chapter-Wise Practice"),
+    MISTAKE_RETRY("MISTAKE_RETRY", "Mistake Retry", "Mistake Retry")
 }
 
 data class TestSeriesItem(

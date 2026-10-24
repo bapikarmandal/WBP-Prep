@@ -75,6 +75,12 @@ data class MistakeNotebookEntity(
     val explanationBn: String,
     val shortcutTrickBn: String = "",
     val shortcutTrickEn: String = "",
+    val chapter: String = "",
+    val isPyq: Boolean = false,
+    val pyqExam: String = "",
+    val pyqYear: String = "",
+    val questionImage: String = "",
+    val optionImagesJson: String = "[\"\",\"\",\"\",\"\"]",
     val isWrongAnswer: Boolean = false,
     val isBookmarked: Boolean = false,
     val wrongAttemptsCount: Int = 1,
@@ -91,6 +97,11 @@ data class MistakeNotebookEntity(
         } catch (_: Exception) {
             optionsEn
         }
+        val optionImages = try {
+            Json.decodeFromString(ListSerializer(String.serializer()), optionImagesJson)
+        } catch (_: Exception) {
+            listOf("", "", "", "")
+        }
         return QuizQuestion(
             id = questionId,
             subject = subject,
@@ -102,7 +113,15 @@ data class MistakeNotebookEntity(
             explanationEn = explanationEn,
             explanationBn = explanationBn,
             shortcutTrickBn = shortcutTrickBn,
-            shortcutTrickEn = shortcutTrickEn
+            shortcutTrickEn = shortcutTrickEn,
+            chapter = chapter,
+            chapterId = chapter,
+            isPyq = isPyq,
+            pyqExam = pyqExam,
+            pyqYear = pyqYear,
+            examYearTag = if (isPyq && pyqExam.isNotBlank()) "$pyqExam $pyqYear".trim() else "",
+            questionImage = questionImage,
+            optionImages = optionImages
         )
     }
 
@@ -114,21 +133,29 @@ data class MistakeNotebookEntity(
             lastWrongIndex: Int = -1,
             wrongAttemptsCount: Int = if (isWrongAnswer) 1 else 0
         ): MistakeNotebookEntity {
-            val optionsEnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsEn)
+            val optionsEnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsEn.ifEmpty { q.optionsBn })
             val optionsBnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsBn)
+            val paddedOptImgs = List(4) { idx -> q.optionImages.getOrNull(idx).orEmpty() }
+            val optionImagesJson = Json.encodeToString(ListSerializer(String.serializer()), paddedOptImgs)
             return MistakeNotebookEntity(
                 questionId = q.id,
                 subject = q.subject,
-                questionEn = q.questionEn,
+                questionEn = q.questionEn.ifBlank { q.questionBn },
                 questionBn = q.questionBn,
                 optionsEnJson = optionsEnJson,
                 optionsBnJson = optionsBnJson,
                 correctIndex = q.correctIndex,
                 lastWrongIndex = lastWrongIndex,
-                explanationEn = q.explanationEn,
+                explanationEn = q.explanationEn.ifBlank { q.explanationBn },
                 explanationBn = q.explanationBn,
                 shortcutTrickBn = q.shortcutTrickBn,
                 shortcutTrickEn = q.shortcutTrickEn,
+                chapter = q.chapter.ifBlank { q.chapterId },
+                isPyq = q.isPyq,
+                pyqExam = q.pyqExam,
+                pyqYear = q.pyqYear,
+                questionImage = q.questionImage,
+                optionImagesJson = optionImagesJson,
                 isWrongAnswer = isWrongAnswer,
                 isBookmarked = isBookmarked,
                 wrongAttemptsCount = wrongAttemptsCount,
@@ -154,6 +181,12 @@ data class QuestionVaultEntity(
     val examYearTag: String = "",
     val chapterId: String = "",
     val examFamily: String = "",
+    val chapter: String = "",
+    val isPyq: Boolean = false,
+    val pyqExam: String = "",
+    val pyqYear: String = "",
+    val questionImage: String = "",
+    val optionImagesJson: String = "[\"\",\"\",\"\",\"\"]",
     val timestamp: Long = System.currentTimeMillis()
 ) {
     fun toQuizQuestion(): QuizQuestion {
@@ -167,6 +200,15 @@ data class QuestionVaultEntity(
         } catch (_: Exception) {
             optionsEn
         }
+        val optionImages = try {
+            Json.decodeFromString(ListSerializer(String.serializer()), optionImagesJson)
+        } catch (_: Exception) {
+            listOf("", "", "", "")
+        }
+        val resolvedChapter = chapter.ifBlank { chapterId }
+        val resolvedExamYearTag = examYearTag.ifBlank {
+            if (isPyq && pyqExam.isNotBlank()) "$pyqExam $pyqYear".trim() else ""
+        }
         return QuizQuestion(
             id = id,
             subject = subject,
@@ -179,31 +221,55 @@ data class QuestionVaultEntity(
             explanationBn = explanationBn,
             shortcutTrickBn = shortcutTrickBn,
             shortcutTrickEn = shortcutTrickEn,
-            examYearTag = examYearTag,
-            chapterId = chapterId,
-            examFamily = examFamily
+            examYearTag = resolvedExamYearTag,
+            chapterId = chapterId.ifBlank { resolvedChapter },
+            examFamily = examFamily,
+            chapter = resolvedChapter,
+            isPyq = isPyq,
+            pyqExam = pyqExam,
+            pyqYear = pyqYear,
+            questionImage = questionImage,
+            optionImages = optionImages
         )
     }
 
     companion object {
         fun fromQuizQuestion(q: QuizQuestion): QuestionVaultEntity {
-            val optionsEnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsEn)
-            val optionsBnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsBn)
+            val cleanOptionsBn = if (q.optionsBn.isNotEmpty()) q.optionsBn else q.optionsEn
+            val cleanOptionsEn = if (q.optionsEn.isNotEmpty()) q.optionsEn else cleanOptionsBn
+            val optionsEnJson = Json.encodeToString(ListSerializer(String.serializer()), cleanOptionsEn)
+            val optionsBnJson = Json.encodeToString(ListSerializer(String.serializer()), cleanOptionsBn)
+            val paddedOptImgs = List(4) { idx -> q.optionImages.getOrNull(idx).orEmpty() }
+            val optionImagesJson = Json.encodeToString(ListSerializer(String.serializer()), paddedOptImgs)
+            val resolvedChapter = q.chapter.ifBlank { q.chapterId }
+            val matchedSpec = WbpPyqVaultSeed.findBestMatchingChapter(q.subject, "$resolvedChapter ${q.questionBn}")
+            val resolvedChapterId = if (q.chapterId.isNotBlank()) q.chapterId else matchedSpec.chapterId
+            val resolvedExamYearTag = if (q.isPyq && q.pyqExam.isNotBlank()) {
+                if (q.pyqYear.isNotBlank()) "${q.pyqExam} ${q.pyqYear}" else q.pyqExam
+            } else {
+                q.examYearTag
+            }
             return QuestionVaultEntity(
                 id = q.id,
-                subject = q.subject,
-                questionEn = q.questionEn,
-                questionBn = q.questionBn,
+                subject = StructuredQuestionSchema.normalizeSubjectCode(q.subject),
+                questionEn = q.questionEn.ifBlank { q.questionBn },
+                questionBn = q.questionBn.ifBlank { q.questionEn },
                 optionsEnJson = optionsEnJson,
                 optionsBnJson = optionsBnJson,
-                correctIndex = q.correctIndex,
-                explanationEn = q.explanationEn,
-                explanationBn = q.explanationBn,
+                correctIndex = q.correctIndex.coerceIn(0, 3),
+                explanationEn = q.explanationEn.ifBlank { q.explanationBn },
+                explanationBn = q.explanationBn.ifBlank { q.explanationEn },
                 shortcutTrickBn = q.shortcutTrickBn,
                 shortcutTrickEn = q.shortcutTrickEn,
-                examYearTag = q.examYearTag,
-                chapterId = q.chapterId,
+                examYearTag = resolvedExamYearTag,
+                chapterId = resolvedChapterId,
                 examFamily = q.examFamily,
+                chapter = resolvedChapter.ifBlank { matchedSpec.titleEn },
+                isPyq = q.isPyq || (q.pyqExam.isNotBlank()),
+                pyqExam = q.pyqExam,
+                pyqYear = q.pyqYear,
+                questionImage = q.questionImage,
+                optionImagesJson = optionImagesJson,
                 timestamp = System.currentTimeMillis()
             )
         }
@@ -266,7 +332,7 @@ interface WbpDao {
     @Query("DELETE FROM mistake_notebook WHERE questionId = :id")
     suspend fun deleteMistakeQuestion(id: String)
 
-    @Query("SELECT * FROM question_vault ORDER BY timestamp ASC")
+    @Query("SELECT * FROM question_vault ORDER BY CASE WHEN id LIKE 'MANUAL_%' OR id LIKE 'SCAN_%' OR id LIKE 'IMPORT_%' OR examFamily = 'USER_UPLOADED' OR examFamily = 'MANUAL_STUDIO' THEN 0 ELSE 1 END ASC, timestamp DESC")
     fun getAllVaultQuestions(): Flow<List<QuestionVaultEntity>>
 
     @Query("SELECT * FROM question_vault")
@@ -277,6 +343,12 @@ interface WbpDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVaultQuestions(items: List<QuestionVaultEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertVaultQuestion(item: QuestionVaultEntity)
+
+    @Query("DELETE FROM question_vault WHERE id = :id")
+    suspend fun deleteVaultQuestionById(id: String)
 }
 
 @Database(
@@ -288,7 +360,7 @@ interface WbpDao {
         MistakeNotebookEntity::class,
         QuestionVaultEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -313,6 +385,14 @@ abstract class AppDatabase : RoomDatabase() {
 }
 
 class WbpRepository(private val dao: WbpDao) {
+    private val backupJsonFormat = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+        encodeDefaults = true
+    }
+
     val syllabusTopics: Flow<List<SyllabusTopicEntity>> = dao.getAllSyllabusTopics()
     val mockResults: Flow<List<MockTestResultEntity>> = dao.getAllMockResults()
     val petRunLogs: Flow<List<PetRunLogEntity>> = dao.getAllPetRunLogs()
@@ -343,7 +423,6 @@ class WbpRepository(private val dao: WbpDao) {
             )
         }
         if (dao.getMistakeCount() == 0) {
-            // Seed 2 starter items (1 wrong answer + 1 bookmarked question) so the Mistake Notebook is immediately actionable
             val sampleMath = WbpSampleData.preloadedQuestions.firstOrNull { it.id == "Q_MATH_2" }
             val sampleGk = WbpSampleData.preloadedQuestions.firstOrNull { it.id == "Q_GK_4" }
             if (sampleMath != null) {
@@ -370,33 +449,42 @@ class WbpRepository(private val dao: WbpDao) {
             }
         }
         if (dao.getVaultQuestionCount() == 0) {
-            // Seed the Question Vault with all authentic SOPAN Academy PYQs (2005–Present) + preloaded bank
-            val initialQuestions = (SopanPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
-                .distinctBy { it.displayQuestionText().trim().lowercase() }
+            val initialQuestions = (WbpPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
+                .distinctBy { TestbookQuestionEngine.normalizeQuestionText(it) }
+                .map { q ->
+                    val matchedChap = WbpPyqVaultSeed.findBestMatchingChapter(q.subject, "${q.chapterId} ${q.questionBn}")
+                    val isOfficialPyq = q.examYearTag.isNotBlank() && !q.examYearTag.contains("Expected", ignoreCase = true)
+                    q.copy(
+                        chapter = q.chapter.ifBlank { matchedChap.titleEn },
+                        isPyq = q.isPyq || isOfficialPyq,
+                        pyqExam = q.pyqExam.ifBlank { if (isOfficialPyq) q.examYearTag.replace(Regex("\\b20\\d{2}\\b"), "").trim() else "" },
+                        pyqYear = q.pyqYear.ifBlank { Regex("\\b(20\\d{2})\\b").find(q.examYearTag)?.value ?: "" }
+                    )
+                }
             dao.insertVaultQuestions(initialQuestions.map { QuestionVaultEntity.fromQuizQuestion(it) })
         }
     }
 
     /**
-     * Deduplicates against existing questions in the vault (by ID and normalized question text)
-     * and permanently appends new MCQs up to 1,000+ per subject.
+     * Deduplicates against existing questions in the vault (by ID and normalized question text:
+     * `question_bn.trim().replace(/\s+/g, ' ')`) and permanently appends new MCQs up to 1,000+ per subject.
      * Returns the count of newly inserted unique questions.
      */
     suspend fun bulkAddUniqueQuestionsToVault(newQuestions: List<QuizQuestion>): Int {
         val existingList = dao.getAllVaultQuestionsList()
-        val existingIds = existingList.map { it.id }.toMutableSet()
+        val existingIds = existingList.map { it.id.trim() }.toMutableSet()
         val existingTexts = existingList.map {
-            (if (it.subject.equals("ENGLISH", ignoreCase = true)) it.questionEn else it.questionBn)
-                .trim()
-                .lowercase()
+            TestbookQuestionEngine.normalizeQuestionText(it.toQuizQuestion())
         }.toMutableSet()
 
         val uniqueToInsert = mutableListOf<QuestionVaultEntity>()
         for (q in newQuestions) {
-            val normText = q.displayQuestionText().trim().lowercase()
-            if (normText.isNotBlank() && normText !in existingTexts && q.id !in existingIds) {
-                existingIds.add(q.id)
-                existingTexts.add(normText)
+            val cleanId = q.id.trim()
+            val normText = TestbookQuestionEngine.normalizeQuestionText(q)
+            val normKey = if (normText.isNotBlank()) normText else "IMG_${q.questionImage.hashCode()}_${cleanId}"
+            if (normKey !in existingTexts && cleanId !in existingIds) {
+                existingIds.add(cleanId)
+                existingTexts.add(normKey)
                 uniqueToInsert.add(QuestionVaultEntity.fromQuizQuestion(q))
             }
         }
@@ -404,6 +492,130 @@ class WbpRepository(private val dao: WbpDao) {
             dao.insertVaultQuestions(uniqueToInsert)
         }
         return uniqueToInsert.size
+    }
+
+    /**
+     * Ingests a batch of manual or imported questions into the Question Bank and returns a detailed
+     * Before-vs-After verification report including newly added IDs, duplicate IDs, and subject breakdown.
+     */
+    suspend fun ingestScannedQuestionsWithReport(scannedQuestions: List<QuizQuestion>): ScanVerificationReport {
+        val existingList = dao.getAllVaultQuestionsList()
+        val beforeCount = existingList.size
+        val existingIds = existingList.map { it.id.trim() }.toMutableSet()
+        val existingByNormText = existingList.associateBy {
+            val q = it.toQuizQuestion()
+            val norm = TestbookQuestionEngine.normalizeQuestionText(q)
+            if (norm.isNotBlank()) norm else "IMG_${q.questionImage.hashCode()}_${q.id}"
+        }.toMutableMap()
+
+        val uniqueEntitiesToInsert = mutableListOf<QuestionVaultEntity>()
+        val finalDisplayQuestions = mutableListOf<QuizQuestion>()
+        val newlyAddedIds = mutableSetOf<String>()
+        val duplicateIds = mutableSetOf<String>()
+        val subjectBreakdown = mutableMapOf(
+            "GK" to 0,
+            "MATH" to 0,
+            "REASONING" to 0,
+            "ENGLISH" to 0
+        )
+
+        for (rawQ in scannedQuestions) {
+            val normSub = StructuredQuestionSchema.normalizeSubjectCode(rawQ.subject)
+            val resolvedPyqTag = if (rawQ.isPyq && rawQ.pyqExam.isNotBlank()) {
+                if (rawQ.pyqYear.isNotBlank()) "${rawQ.pyqExam} (${rawQ.pyqYear})" else rawQ.pyqExam
+            } else {
+                rawQ.examYearTag.ifBlank { "Custom Studio Question" }
+            }
+            val taggedQ = rawQ.copy(
+                id = if (rawQ.id.startsWith("MANUAL_", ignoreCase = true) ||
+                    rawQ.id.startsWith("SMART_SCAN_", ignoreCase = true) ||
+                    rawQ.id.startsWith("UPLOADED_", ignoreCase = true)
+                ) {
+                    rawQ.id
+                } else {
+                    "MANUAL_${normSub}_${System.currentTimeMillis()}_${rawQ.id}"
+                },
+                subject = normSub,
+                examFamily = if (rawQ.examFamily.isNotBlank()) rawQ.examFamily else "USER_UPLOADED",
+                examYearTag = resolvedPyqTag
+            )
+            val cleanId = taggedQ.id.trim()
+            val rawNorm = TestbookQuestionEngine.normalizeQuestionText(taggedQ)
+            val normKey = if (rawNorm.isNotBlank()) rawNorm else "IMG_${taggedQ.questionImage.hashCode()}_${cleanId}"
+            if (normKey !in existingByNormText && cleanId !in existingIds) {
+                existingIds.add(cleanId)
+                val entity = QuestionVaultEntity.fromQuizQuestion(taggedQ)
+                existingByNormText[normKey] = entity
+                uniqueEntitiesToInsert.add(entity)
+                newlyAddedIds.add(cleanId)
+                finalDisplayQuestions.add(entity.toQuizQuestion())
+                val subKey = taggedQ.subject.uppercase()
+                subjectBreakdown[subKey] = (subjectBreakdown[subKey] ?: 0) + 1
+            } else {
+                val existingEntity = existingByNormText[normKey]
+                val resolvedQ = existingEntity?.toQuizQuestion()?.copy(examFamily = "USER_UPLOADED") ?: taggedQ
+                if (existingEntity != null) {
+                    val updatedEntity = QuestionVaultEntity.fromQuizQuestion(
+                        taggedQ.copy(id = existingEntity.id, examFamily = "USER_UPLOADED")
+                    )
+                    dao.upsertVaultQuestion(updatedEntity)
+                }
+                duplicateIds.add(resolvedQ.id)
+                finalDisplayQuestions.add(resolvedQ)
+            }
+        }
+
+        if (uniqueEntitiesToInsert.isNotEmpty()) {
+            dao.insertVaultQuestions(uniqueEntitiesToInsert)
+        }
+
+        val afterCount = beforeCount + uniqueEntitiesToInsert.size
+        return ScanVerificationReport(
+            beforeScanTotal = beforeCount,
+            extractedTotalCount = finalDisplayQuestions.size,
+            newlyAddedCount = uniqueEntitiesToInsert.size,
+            duplicatesIgnoredCount = duplicateIds.size,
+            afterScanTotal = afterCount,
+            subjectBreakdown = subjectBreakdown.filterValues { it > 0 },
+            extractedQuestions = finalDisplayQuestions,
+            newlyAddedIds = newlyAddedIds,
+            duplicateIds = duplicateIds
+        )
+    }
+
+    /**
+     * Exports the entire Question Bank as a clean, pretty-printed JSON array matching the
+     * Structured Question Database Schema (`id`, `subject`, `chapter`, `is_pyq`, `pyq_exam`, `pyq_year`,
+     * `question_bn`, `question_image`, `options_bn`, `option_images`, `correct_index`, `explanation_bn`).
+     */
+    suspend fun exportVaultAsJson(): String {
+        val allQuestions = dao.getAllVaultQuestionsList().map { it.toQuizQuestion() }
+        return backupJsonFormat.encodeToString(ListSerializer(QuizQuestion.serializer()), allQuestions)
+    }
+
+    /**
+     * Imports a JSON Backup file (`.json`) into the Question Bank, supporting both full `QuizQuestion`
+     * arrays and flexible JSON question objects.
+     */
+    suspend fun importDatabaseBackupJson(rawJson: String): ScanVerificationReport {
+        val cleaned = rawJson.trim().removePrefix("\uFEFF")
+        val parsedQuestions: List<QuizQuestion> = try {
+            backupJsonFormat.decodeFromString(ListSerializer(QuizQuestion.serializer()), cleaned)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return ingestScannedQuestionsWithReport(parsedQuestions)
+    }
+
+    suspend fun updateVaultQuestion(updatedQuestion: QuizQuestion) {
+        val tagged = updatedQuestion.copy(
+            examFamily = if (updatedQuestion.examFamily.isBlank()) "USER_UPLOADED" else updatedQuestion.examFamily
+        )
+        dao.upsertVaultQuestion(QuestionVaultEntity.fromQuizQuestion(tagged))
+    }
+
+    suspend fun deleteVaultQuestion(questionId: String) {
+        dao.deleteVaultQuestionById(questionId)
     }
 
     suspend fun toggleSyllabusTopic(topic: SyllabusTopicEntity) {

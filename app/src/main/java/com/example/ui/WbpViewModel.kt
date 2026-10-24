@@ -41,10 +41,8 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("wbp_kp_prefs", Context.MODE_PRIVATE)
     private val repository = WbpRepository(AppDatabase.getInstance(application).wbpDao())
 
-    // Persistent Preferences (Language, Dark Mode, Selected Exam, Daily Streak)
-    private val _language = MutableStateFlow(
-        if (prefs.getString("lang", "BN") == "EN") AppLanguage.ENGLISH else AppLanguage.BENGALI
-    )
+    // Persistent Preferences (UI standardized 100% to English; Dark Mode, Selected Exam, Daily Streak)
+    private val _language = MutableStateFlow(AppLanguage.ENGLISH)
     val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
     private val _isDarkMode = MutableStateFlow(prefs.getBoolean("dark_mode", true))
@@ -107,6 +105,46 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isImportingPyqBook = MutableStateFlow<Boolean>(false)
     val isImportingPyqBook: StateFlow<Boolean> = _isImportingPyqBook.asStateFlow()
+
+    // AI Smart Question Scanner & Auto-Vault Builder Batch Queue + 4-Step Verification State
+    private val _scannerCurrentPage = MutableStateFlow(0)
+    val scannerCurrentPage: StateFlow<Int> = _scannerCurrentPage.asStateFlow()
+
+    private val _scannerTotalPages = MutableStateFlow(0)
+    val scannerTotalPages: StateFlow<Int> = _scannerTotalPages.asStateFlow()
+
+    private val _scannerAddedCount = MutableStateFlow(0)
+    val scannerAddedCount: StateFlow<Int> = _scannerAddedCount.asStateFlow()
+
+    private val _scannerExtractedCount = MutableStateFlow(0)
+    val scannerExtractedCount: StateFlow<Int> = _scannerExtractedCount.asStateFlow()
+
+    // 4-Step Live Scanning Progress Tracker:
+    // 0 = Not started, 1 = Image/PDF Loaded, 2 = AI Scanning & Solving, 3 = Extracted [X] Questions, 4 = Permanently Saved in Bank
+    private val _scannerStep = MutableStateFlow(0)
+    val scannerStep: StateFlow<Int> = _scannerStep.asStateFlow()
+
+    private val _scannerErrorMessage = MutableStateFlow<String?>(null)
+    val scannerErrorMessage: StateFlow<String?> = _scannerErrorMessage.asStateFlow()
+
+    private val _scannerVerificationReport = MutableStateFlow<com.example.data.ScanVerificationReport?>(null)
+    val scannerVerificationReport: StateFlow<com.example.data.ScanVerificationReport?> = _scannerVerificationReport.asStateFlow()
+
+    private val _scannerToastMessage = MutableStateFlow<String?>(null)
+    val scannerToastMessage: StateFlow<String?> = _scannerToastMessage.asStateFlow()
+
+    fun clearScannerToastMessage() {
+        _scannerToastMessage.value = null
+    }
+
+    fun clearScannerErrorMessage() {
+        _scannerErrorMessage.value = null
+    }
+
+    fun notifyScannerInputLoaded() {
+        _scannerStep.value = 1
+        _scannerErrorMessage.value = null
+    }
 
     // Live OMR Mock Test & Testbook Exam Hub State
     private val _questions = MutableStateFlow<List<QuizQuestion>>(initialSeedVault.take(25))
@@ -197,13 +235,32 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             repository.ensureSeedData()
+            try {
+                val backupFile = java.io.File(getApplication<Application>().filesDir, "wbp_question_database_backup.json")
+                if (backupFile.exists() && backupFile.length() > 10L) {
+                    val rawJson = backupFile.readText()
+                    if (rawJson.isNotBlank()) {
+                        repository.importDatabaseBackupJson(rawJson)
+                    }
+                }
+            } catch (_: Exception) {
+            }
         }
         startOrResetTimer(600)
         resetInterviewForDistrict(_selectedDistrict.value)
     }
 
+    private suspend fun syncLocalDatabaseBackupFile() {
+        try {
+            val backupJson = repository.exportVaultAsJson()
+            val backupFile = java.io.File(getApplication<Application>().filesDir, "wbp_question_database_backup.json")
+            backupFile.writeText(backupJson)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun rememberInitialSeedVault(): List<QuizQuestion> {
-        return (com.example.data.SopanPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
+        return (com.example.data.WbpPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
             .distinctBy { com.example.data.TestbookQuestionEngine.normalizeQuestionText(it) }
     }
 
@@ -397,7 +454,7 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
             )
             var inserted = repository.bulkAddUniqueQuestionsToVault(batch)
             if (inserted < 50) {
-                val extra = com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
+                val extra = com.example.data.WbpPyqVaultSeed.generateProgrammaticBatch(
                     subject = subject.uppercase(),
                     chapterId = chapterId,
                     startOffset = questionVault.value.size + inserted + 500,
@@ -415,8 +472,350 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Imports PYQs from the 4 SOPAN Academy WBP Warrior PYQ Books (PDF/TXT file or pasted text) via `gemini-2.5-flash`
-     * and permanently stores them in the non-repeating Question Vault.
+     * AI Smart Question Scanner & Auto-Vault Builder (Batch Processing Queue for 1–20+ Pages / PDFs / Links):
+     * - Drives the 4-Step Live Scanning Progress Tracker:
+     *   Step 1: 📸 Image/PDF Load Ho Gayi (Thumbnail preview ke sath)
+     *   Step 2: 🤖 AI Page Scan Kar Raha Hai & Questions Solve Kar Raha Hai...
+     *   Step 3: ✨ Is Image Se [X] Questions Extract Hue!
+     *   Step 4: ✅ Question Bank Mein Permanently Save Ho Gaye!
+     * - Produces a complete "Before vs After" `ScanVerificationReport` + Live Preview List of extracted questions.
+     * - Surfaces any blurry image or API error in `_scannerErrorMessage` without silently closing.
+     */
+    fun scanAndIngestSmartQuestionsBatch(
+        rawTextOrUrl: String,
+        attachments: List<GeminiClient.ScannerInlineAttachment> = emptyList(),
+        declaredPageCount: Int = 0,
+        subjectHint: String? = null,
+        customApiKey: String? = null
+    ) {
+        if (_isImportingPyqBook.value) return
+        _isImportingPyqBook.value = true
+        _scannerAddedCount.value = 0
+        _scannerExtractedCount.value = 0
+        _scannerErrorMessage.value = null
+        _scannerVerificationReport.value = null
+        _scannerStep.value = 2 // Step 2: 🤖 AI Page Scan Kar Raha Hai & Questions Solve Kar Raha Hai...
+
+        viewModelScope.launch {
+            val trimmedInput = rawTextOrUrl.trim()
+            val resolvedText = if (trimmedInput.startsWith("http://", ignoreCase = true) ||
+                trimmedInput.startsWith("https://", ignoreCase = true)
+            ) {
+                GeminiClient.fetchWebpageTextFromUrl(trimmedInput)
+            } else {
+                trimmedInput
+            }
+
+            data class BatchWorkUnit(
+                val pageNumber: Int,
+                val textSlice: String,
+                val batchAttachments: List<GeminiClient.ScannerInlineAttachment>
+            )
+
+            val workQueue = mutableListOf<BatchWorkUnit>()
+
+            if (attachments.size > 1) {
+                attachments.forEachIndexed { idx, att ->
+                    workQueue.add(
+                        BatchWorkUnit(
+                            pageNumber = idx + 1,
+                            textSlice = if (idx == 0) resolvedText else "Extract all MCQs from ${att.label.ifBlank { "Page ${idx + 1}" }}",
+                            batchAttachments = listOf(att)
+                        )
+                    )
+                }
+            } else if (attachments.size == 1 && declaredPageCount > 1) {
+                val totalPdfPages = declaredPageCount.coerceAtMost(30)
+                var pageCursor = 1
+                var stepIdx = 1
+                while (pageCursor <= totalPdfPages) {
+                    val endPage = (pageCursor + 1).coerceAtMost(totalPdfPages)
+                    workQueue.add(
+                        BatchWorkUnit(
+                            pageNumber = stepIdx,
+                            textSlice = "Focus strictly on extracting every MCQ from Page $pageCursor to Page $endPage of this PDF. $resolvedText",
+                            batchAttachments = attachments
+                        )
+                    )
+                    pageCursor += 2
+                    stepIdx++
+                }
+            } else if (attachments.size == 1) {
+                workQueue.add(
+                    BatchWorkUnit(
+                        pageNumber = 1,
+                        textSlice = resolvedText,
+                        batchAttachments = attachments
+                    )
+                )
+            } else {
+                val chunks = if (resolvedText.length <= 3200) {
+                    listOf(resolvedText)
+                } else {
+                    resolvedText.chunked(3000)
+                }
+                chunks.forEachIndexed { idx, chunk ->
+                    workQueue.add(
+                        BatchWorkUnit(
+                            pageNumber = idx + 1,
+                            textSlice = chunk,
+                            batchAttachments = emptyList()
+                        )
+                    )
+                }
+            }
+
+            val totalBatches = workQueue.size.coerceAtLeast(1)
+            _scannerTotalPages.value = totalBatches
+            val allExtractedQuestions = mutableListOf<QuizQuestion>()
+            val collectedErrors = mutableListOf<String>()
+
+            workQueue.forEachIndexed { index, unit ->
+                val currentPageNum = index + 1
+                _scannerCurrentPage.value = currentPageNum
+                _mockStatusBanner.value = "Scanning Page $currentPageNum of $totalBatches with AI... (+${allExtractedQuestions.size} Extracted)"
+
+                val outcome = GeminiClient.scanSmartQuestionBatchDetailed(
+                    rawText = unit.textSlice,
+                    attachments = unit.batchAttachments,
+                    pageBatchLabel = "Page $currentPageNum of $totalBatches",
+                    subjectHint = subjectHint,
+                    batchSeedOffset = (questionVault.value.size + allExtractedQuestions.size + (currentPageNum * 17)),
+                    customApiKey = customApiKey
+                )
+                if (!outcome.errorMessage.isNullOrBlank()) {
+                    collectedErrors.add(outcome.errorMessage)
+                }
+                if (outcome.questions.isNotEmpty()) {
+                    allExtractedQuestions.addAll(outcome.questions)
+                    _scannerExtractedCount.value = allExtractedQuestions.size
+                    _scannerStep.value = 3
+                }
+            }
+
+            // Step 3 & Step 4: Extracted [X] Questions & Permanently Saved to Question Bank
+            _scannerExtractedCount.value = allExtractedQuestions.size
+
+            if (allExtractedQuestions.isNotEmpty()) {
+                _scannerErrorMessage.value = null
+                _scannerStep.value = 3
+                val report = repository.ingestScannedQuestionsWithReport(allExtractedQuestions)
+                _scannerVerificationReport.value = report
+                _scannerAddedCount.value = report.newlyAddedCount
+
+                // Step 4: Permanently saved to Question Bank
+                _scannerStep.value = 4
+
+                // Prepend (unshift) newly extracted questions into SharedPreferences (localStorage) & persist latest total
+                val serializedBatch = GeminiClient.formatQuestionsAsRequiredJson(report.extractedQuestions)
+                prefs.edit()
+                    .putInt("vault_total_saved_count", report.afterScanTotal)
+                    .putString("uploaded_questions_json", serializedBatch)
+                    .apply()
+
+                val toastText = "Vault Count Before Scan: ${report.beforeScanTotal} | Extracted from This File: +${report.newlyAddedCount} | New Vault Total: ${report.afterScanTotal}"
+                _scannerToastMessage.value = toastText
+                _mockStatusBanner.value = toastText
+            } else {
+                _scannerStep.value = 1
+                _scannerErrorMessage.value = collectedErrors.distinct().firstOrNull()
+                    ?: "No readable questions were detected in this image. Please upload a clearer photo."
+            }
+
+            _isImportingPyqBook.value = false
+        }
+    }
+
+    private val _isGeneratingExplanation = MutableStateFlow(false)
+    val isGeneratingExplanation: StateFlow<Boolean> = _isGeneratingExplanation.asStateFlow()
+
+    /**
+     * Manual Question Studio (1 to 50 Questions at Once):
+     * Saves the staged batch of 1–50 structured questions permanently into Room SQLite + JSON file backup,
+     * updates the Question Bank counter immediately, and triggers a confirmation toast/report.
+     */
+    fun saveManualQuestionsBatch(
+        questions: List<QuizQuestion>,
+        onSaved: (() -> Unit)? = null
+    ) {
+        if (questions.isEmpty()) return
+        viewModelScope.launch {
+            val report = repository.ingestScannedQuestionsWithReport(questions)
+            _scannerVerificationReport.value = report
+            _scannerAddedCount.value = report.newlyAddedCount
+            _scannerExtractedCount.value = questions.size
+            _scannerStep.value = 4
+            _scannerErrorMessage.value = null
+
+            // Sync persistent JSON backup file in internal filesDir for 4,000+ questions & images
+            syncLocalDatabaseBackupFile()
+
+            prefs.edit()
+                .putInt("vault_total_saved_count", report.afterScanTotal)
+                .apply()
+
+            val msg = "✅ Saved +${report.newlyAddedCount} Question(s) to Database! (Total Bank: ${report.afterScanTotal})"
+            _scannerToastMessage.value = msg
+            _mockStatusBanner.value = msg
+            onSaved?.invoke()
+        }
+    }
+
+    /**
+     * 1-Click Database Backup Export (.json):
+     * Exports all custom & structured questions in the Question Bank as a formatted JSON string.
+     */
+    fun exportDatabaseBackupJson(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val jsonStr = repository.exportVaultAsJson()
+                val backupFile = java.io.File(getApplication<Application>().filesDir, "wbp_question_database_backup.json")
+                backupFile.writeText(jsonStr)
+                _scannerToastMessage.value = "📤 Database Backup (.json) generated (${questionVault.value.size} total questions)!"
+                onResult(jsonStr)
+            } catch (e: Exception) {
+                _scannerToastMessage.value = "⚠️ Export failed: ${e.localizedMessage ?: "Unknown error"}"
+            }
+        }
+    }
+
+    /**
+     * 1-Click Database Backup Import (.json):
+     * Restores questions (including Reasoning images, chapters, and PYQ tags) from a JSON backup string.
+     */
+    fun importDatabaseBackupJson(rawJson: String, onCompleted: ((Int) -> Unit)? = null) {
+        if (rawJson.isBlank()) {
+            _scannerToastMessage.value = "⚠️ Backup JSON file is empty."
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val report = repository.importDatabaseBackupJson(rawJson)
+                _scannerVerificationReport.value = report
+                _scannerAddedCount.value = report.newlyAddedCount
+                _scannerStep.value = 4
+                val msg = if (report.extractedTotalCount > 0) {
+                    "📥 Restored ${report.extractedTotalCount} Question(s) from Backup (+${report.newlyAddedCount} new, Total Bank: ${report.afterScanTotal})!"
+                } else {
+                    "⚠️ No valid questions found in the selected .json file."
+                }
+                syncLocalDatabaseBackupFile()
+                _scannerToastMessage.value = msg
+                _mockStatusBanner.value = msg
+                onCompleted?.invoke(report.newlyAddedCount)
+            } catch (e: Exception) {
+                _scannerToastMessage.value = "⚠️ Failed to import JSON backup: ${e.localizedMessage ?: "Invalid JSON format"}"
+            }
+        }
+    }
+
+    /**
+     * Optional 1-Click AI Shortcut Explanation Helper ("✨ Auto-Generate Bengali Shortcut"):
+     * Calls `gemini-2.5-flash` with the user's typed question and selected correct option to generate
+     * a step-by-step Bengali explanation (`explanation_bn`).
+     */
+    fun autoGenerateBengaliExplanation(
+        subject: String,
+        chapter: String,
+        questionText: String,
+        options: List<String>,
+        correctIndex: Int,
+        onResult: (String) -> Unit
+    ) {
+        if (questionText.isBlank()) {
+            _scannerToastMessage.value = "⚠️ Please type the Question text first before generating an explanation."
+            return
+        }
+        if (_isGeneratingExplanation.value) return
+        _isGeneratingExplanation.value = true
+        viewModelScope.launch {
+            try {
+                val explanation = GeminiClient.generateBengaliShortcutExplanation(
+                    subject = subject,
+                    chapter = chapter,
+                    questionText = questionText,
+                    options = options,
+                    correctIndex = correctIndex
+                )
+                onResult(explanation)
+                _scannerToastMessage.value = "✨ Bengali shortcut explanation generated!"
+            } finally {
+                _isGeneratingExplanation.value = false
+            }
+        }
+    }
+
+    fun updateUploadedQuestion(updatedQuestion: QuizQuestion) {
+        viewModelScope.launch {
+            repository.updateVaultQuestion(updatedQuestion)
+            syncLocalDatabaseBackupFile()
+            val currentReport = _scannerVerificationReport.value
+            if (currentReport != null) {
+                val updatedList = currentReport.extractedQuestions.map {
+                    if (it.id == updatedQuestion.id) updatedQuestion else it
+                }
+                _scannerVerificationReport.value = currentReport.copy(extractedQuestions = updatedList)
+            }
+            _scannerToastMessage.value = "✅ Question updated & saved in Question Bank!"
+        }
+    }
+
+    fun deleteUploadedQuestion(questionId: String) {
+        viewModelScope.launch {
+            repository.deleteVaultQuestion(questionId)
+            syncLocalDatabaseBackupFile()
+            val currentReport = _scannerVerificationReport.value
+            if (currentReport != null) {
+                val removedQ = currentReport.extractedQuestions.firstOrNull { it.id == questionId }
+                val remaining = currentReport.extractedQuestions.filterNot { it.id == questionId }
+                val wasNewlyAdded = questionId in currentReport.newlyAddedIds
+                val newAddedCount = if (wasNewlyAdded) (currentReport.newlyAddedCount - 1).coerceAtLeast(0) else currentReport.newlyAddedCount
+                val newAfterTotal = if (wasNewlyAdded) (currentReport.afterScanTotal - 1).coerceAtLeast(currentReport.beforeScanTotal) else currentReport.afterScanTotal
+                val updatedBreakdown = currentReport.subjectBreakdown.toMutableMap()
+                if (wasNewlyAdded && removedQ != null) {
+                    val subKey = removedQ.subject.uppercase()
+                    val nextVal = ((updatedBreakdown[subKey] ?: 1) - 1).coerceAtLeast(0)
+                    if (nextVal == 0) updatedBreakdown.remove(subKey) else updatedBreakdown[subKey] = nextVal
+                }
+                _scannerVerificationReport.value = currentReport.copy(
+                    extractedTotalCount = remaining.size,
+                    newlyAddedCount = newAddedCount,
+                    afterScanTotal = newAfterTotal,
+                    subjectBreakdown = updatedBreakdown,
+                    extractedQuestions = remaining,
+                    newlyAddedIds = currentReport.newlyAddedIds - questionId
+                )
+                _scannerAddedCount.value = newAddedCount
+                _scannerExtractedCount.value = remaining.size
+            }
+            _scannerToastMessage.value = "🗑️ Question deleted from Question Bank."
+        }
+    }
+
+    /**
+     * Immediately starts a Live OMR Test with the user's uploaded questions (either from the latest scan
+     * or from the "📥 My Uploaded Questions" tab) so the user can 100% verify them in exam mode.
+     */
+    fun startUploadedQuestionsQuiz(
+        uploadedQuestions: List<QuizQuestion>,
+        titleEn: String = "My Uploaded Questions Live Test",
+        titleBn: String = "আমার আপলোড করা প্রশ্নের লাইভ টেস্ট"
+    ) {
+        if (uploadedQuestions.isEmpty()) return
+        _isRetryMistakesMode.value = false
+        _activeTestId.value = "USER_UPLOADED_TEST_${System.currentTimeMillis()}"
+        _activeTestTitleEn.value = "$titleEn (${uploadedQuestions.size} Qs)"
+        _activeTestTitleBn.value = "$titleBn (${uploadedQuestions.size}টি প্রশ্ন)"
+        _questions.value = uploadedQuestions
+        resetOmrSession(durationSeconds = max(180, uploadedQuestions.size * 45))
+        _isExamPaused.value = false
+        _isLiveExamActive.value = true
+        _mockStatusBanner.value = "📥 Testing ${uploadedQuestions.size} Uploaded Question(s) from Question Bank"
+        _currentTab.value = BottomNavTab.MOCK_TEST
+    }
+
+    /**
+     * Backwards-compatible single-call entry point delegating to the AI Smart Question Scanner Batch Queue.
      */
     fun importPyqBookContent(
         rawText: String,
@@ -424,31 +823,26 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         documentMimeType: String? = null,
         subjectHint: String = "GK"
     ) {
-        if (_isImportingPyqBook.value) return
-        _isImportingPyqBook.value = true
-        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-            "📥 Gemini 2.5 Flash SOPAN Academy বুক থেকে PYQ প্রশ্ন, সাল ও ব্যাখ্যা এক্সট্র্যাক্ট করছে..."
-        else
-            "📥 Gemini 2.5 Flash is extracting PYQ questions, exam year tags & Bengali explanations..."
-
-        viewModelScope.launch {
-            val res = GeminiClient.extractPyqsFromBookContent(
-                rawText = rawText,
-                base64Document = base64Document,
-                documentMimeType = documentMimeType,
-                subjectHint = subjectHint
+        val attachments = if (!base64Document.isNullOrBlank() && !documentMimeType.isNullOrBlank()) {
+            listOf(
+                GeminiClient.ScannerInlineAttachment(
+                    mimeType = documentMimeType,
+                    base64Data = base64Document,
+                    label = "Page 1"
+                )
             )
-            val extractedList = res.getOrDefault(emptyList())
-            val addedCount = repository.bulkAddUniqueQuestionsToVault(extractedList)
-            _isImportingPyqBook.value = false
-            _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-                "✅ SOPAN বুক থেকে ${extractedList.size}টি প্রশ্ন শনাক্ত হয়েছে এবং $addedCount টি নতুন প্রশ্ন স্থায়ীভাবে ভল্টে যুক্ত হয়েছে!"
-            else
-                "✅ Extracted ${extractedList.size} PYQs ($addedCount brand-new unique questions saved to Vault)!"
+        } else {
+            emptyList()
         }
+        scanAndIngestSmartQuestionsBatch(
+            rawTextOrUrl = rawText,
+            attachments = attachments,
+            declaredPageCount = 1,
+            subjectHint = subjectHint.takeIf { it != "AUTO" }
+        )
     }
 
-    fun startChapterPracticeTest(chapter: com.example.data.SopanChapterSpec) {
+    fun startChapterPracticeTest(chapter: com.example.data.WbpChapterSpec) {
         _isRetryMistakesMode.value = false
         _activeTestId.value = "CHAPTER_${chapter.id}"
         _activeTestTitleEn.value = "${chapter.subject} • ${chapter.numberCode}. ${chapter.titleEn}"
@@ -570,9 +964,8 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleLanguage() {
-        val next = if (_language.value == AppLanguage.BENGALI) AppLanguage.ENGLISH else AppLanguage.BENGALI
-        _language.value = next
-        prefs.edit().putString("lang", next.code).apply()
+        _language.value = AppLanguage.ENGLISH
+        prefs.edit().putString("lang", AppLanguage.ENGLISH.code).apply()
     }
 
     fun toggleDarkMode() {

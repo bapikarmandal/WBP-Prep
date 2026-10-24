@@ -121,7 +121,7 @@ object ChapterStudyNotesRepository {
         )
     )
 
-    fun getStudyNoteForChapter(chapter: SopanChapterInfo): ChapterStudyNote {
+    fun getStudyNoteForChapter(chapter: WbpChapterInfo): ChapterStudyNote {
         return when (chapter.subject.uppercase()) {
             "MATH" -> buildMathChapterNote(chapter)
             "REASONING" -> buildReasoningChapterNote(chapter)
@@ -130,7 +130,7 @@ object ChapterStudyNotesRepository {
         }
     }
 
-    private fun buildMathChapterNote(chapter: SopanChapterInfo): ChapterStudyNote {
+    private fun buildMathChapterNote(chapter: WbpChapterInfo): ChapterStudyNote {
         return when (chapter.chapterId) {
             "MATH_CH_01" -> ChapterStudyNote(
                 chapterId = chapter.chapterId,
@@ -272,7 +272,7 @@ object ChapterStudyNotesRepository {
         }
     }
 
-    private fun buildReasoningChapterNote(chapter: SopanChapterInfo): ChapterStudyNote {
+    private fun buildReasoningChapterNote(chapter: WbpChapterInfo): ChapterStudyNote {
         return ChapterStudyNote(
             chapterId = chapter.chapterId,
             subject = "REASONING",
@@ -297,7 +297,7 @@ object ChapterStudyNotesRepository {
         )
     }
 
-    private fun buildEnglishChapterNote(chapter: SopanChapterInfo): ChapterStudyNote {
+    private fun buildEnglishChapterNote(chapter: WbpChapterInfo): ChapterStudyNote {
         return ChapterStudyNote(
             chapterId = chapter.chapterId,
             subject = "ENGLISH",
@@ -322,7 +322,7 @@ object ChapterStudyNotesRepository {
         )
     }
 
-    private fun buildGkChapterNote(chapter: SopanChapterInfo): ChapterStudyNote {
+    private fun buildGkChapterNote(chapter: WbpChapterInfo): ChapterStudyNote {
         return ChapterStudyNote(
             chapterId = chapter.chapterId,
             subject = "GK",

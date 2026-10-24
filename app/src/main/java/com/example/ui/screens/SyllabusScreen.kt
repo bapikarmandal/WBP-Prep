@@ -33,7 +33,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Flip
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.TableChart
@@ -78,8 +78,8 @@ import com.example.data.PocketCardsRepository
 import com.example.data.PocketRevisionCard
 import com.example.data.QuizQuestion
 import com.example.data.RevisionDeckType
-import com.example.data.SopanChapterInfo
-import com.example.data.SopanPyqVaultSeed
+import com.example.data.WbpChapterInfo
+import com.example.data.WbpPyqVaultSeed
 import com.example.data.StaticRevisionTable
 import com.example.data.SubjectCategory
 import com.example.data.SyllabusTopicEntity
@@ -99,8 +99,8 @@ fun SyllabusScreen(
     questionVault: List<QuizQuestion> = emptyList(),
     seenQuestionIds: Set<String> = emptySet(),
     bulkGeneratingTarget: String? = null,
-    onStartChapterTest: (SopanChapterInfo) -> Unit = {},
-    onBulkAdd50ForChapter: (SopanChapterInfo) -> Unit = {}
+    onStartChapterTest: (WbpChapterInfo) -> Unit = {},
+    onBulkAdd50ForChapter: (WbpChapterInfo) -> Unit = {}
 ) {
     val isBn = language == AppLanguage.BENGALI
     var isFlashcardsTab by remember { mutableStateOf(initialFlashcardsMode) }
@@ -293,7 +293,7 @@ fun SyllabusScreen(
             )
         }
 
-        // REQUIREMENT 3: CHAPTER-WISE STUDY NOTES, SHORTCUT FORMULAS & CHEAT SHEETS (All 53 SOPAN Chapters)
+        // REQUIREMENT 3: CHAPTER-WISE STUDY NOTES, SHORTCUT FORMULAS & CHEAT SHEETS (All 53 WBP & KP Chapters)
         item {
             ChapterWiseStudyHubSection(
                 isBn = isBn,
@@ -304,7 +304,7 @@ fun SyllabusScreen(
                 bulkGeneratingTarget = bulkGeneratingTarget,
                 onSelectSubject = { sub ->
                     selectedStudySubject = sub
-                    expandedChapterId = SopanPyqVaultSeed.getChaptersForSubject(sub).firstOrNull()?.chapterId
+                    expandedChapterId = WbpPyqVaultSeed.getChaptersForSubject(sub).firstOrNull()?.chapterId
                 },
                 onToggleChapterExpand = { chId ->
                     expandedChapterId = if (expandedChapterId == chId) null else chId
@@ -891,7 +891,7 @@ private fun PocketFlashcardItem(
 }
 
 /**
- * Complete Chapter-Wise Study Hub across all 53 SOPAN Academy chapters with 3 sub-tabs inside every chapter:
+ * Complete Chapter-Wise Study Hub across all 53 WBP & KP Smart Question Bank chapters with 3 sub-tabs inside every chapter:
  * [1. Concept & Shortcut Notes (বাংলায়)], [2. Chapter PYQs (2005–2024)], and [3. Start Chapter Test].
  */
 @Composable
@@ -904,8 +904,8 @@ private fun ChapterWiseStudyHubSection(
     bulkGeneratingTarget: String?,
     onSelectSubject: (String) -> Unit,
     onToggleChapterExpand: (String) -> Unit,
-    onStartChapterTest: (SopanChapterInfo) -> Unit,
-    onBulkAdd50ForChapter: (SopanChapterInfo) -> Unit
+    onStartChapterTest: (WbpChapterInfo) -> Unit,
+    onBulkAdd50ForChapter: (WbpChapterInfo) -> Unit
 ) {
     val subjectTabs = listOf(
         Triple("MATH", "Math Shortcuts (18 Ch)", "গণিত শর্টকাট (১৮ অধ্যায়)"),
@@ -915,7 +915,7 @@ private fun ChapterWiseStudyHubSection(
     )
 
     val chapters = remember(selectedSubject) {
-        SopanPyqVaultSeed.getChaptersForSubject(selectedSubject)
+        WbpPyqVaultSeed.getChaptersForSubject(selectedSubject)
     }
 
     Card(
@@ -938,7 +938,7 @@ private fun ChapterWiseStudyHubSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.MenuBook,
+                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp)

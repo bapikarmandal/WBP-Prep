@@ -7,9 +7,16 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -83,6 +90,7 @@ data class GeneratedAiQuestionDto(
     @SerialName("shortcut_trick_bn") val shortcutTrickBn: String = "",
     @SerialName("shortcut_trick_en") val shortcutTrickEn: String = "",
     @SerialName("exam_year_tag") val examYearTag: String = "",
+    @SerialName("chapter") val chapter: String = "",
     @SerialName("chapter_id") val chapterId: String = "",
     @SerialName("exam_family") val examFamily: String = ""
 )
@@ -124,6 +132,7 @@ object GeminiClient {
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
+        explicitNulls = false
     }
 
     private val okHttpClient = OkHttpClient.Builder()
@@ -143,6 +152,147 @@ object GeminiClient {
 
     private fun isApiKeyConfigured(key: String): Boolean {
         return key.isNotBlank() && key != "MY_GEMINI_API_KEY" && !key.startsWith("YOUR_")
+    }
+
+    /**
+     * Strictly cleans markdown backticks (` ```json ` and ` ``` `) from Gemini's raw response
+     * before JSON parsing so `JSON.parse()` / `decodeFromString` never fails.
+     */
+    fun cleanMarkdownJson(rawText: String): String {
+        val stripped = rawText
+            .replace(Regex("(?i)```json"), "")
+            .replace("```", "")
+            .trim()
+        if (stripped.isEmpty()) return ""
+
+        // If the stripped string already starts with '[' or '{' and ends with ']' or '}', return it directly
+        if ((stripped.startsWith("[") && stripped.endsWith("]")) ||
+            (stripped.startsWith("{") && stripped.endsWith("}"))
+        ) {
+            return stripped
+        }
+
+        // Look for a JSON array of objects `[ { ... } ]`
+        val arrayOfObjectsMatch = Regex("""\[\s*\{""").find(stripped)
+        val lastBracket = stripped.lastIndexOf(']')
+        if (arrayOfObjectsMatch != null && lastBracket > arrayOfObjectsMatch.range.first) {
+            return stripped.substring(arrayOfObjectsMatch.range.first, lastBracket + 1).trim()
+        }
+
+        // Otherwise look for a JSON object `{ ... }`
+        val firstBrace = stripped.indexOf('{')
+        val lastBrace = stripped.lastIndexOf('}')
+        if (firstBrace != -1 && lastBrace > firstBrace) {
+            return stripped.substring(firstBrace, lastBrace + 1).trim()
+        }
+
+        return stripped
+    }
+
+    /**
+     * Resiliently parses a cleaned JSON string into `GeneratedAiQuestionDto` items, supporting
+     * top-level JSON arrays `[...]`, wrapper objects `{"questions": [...]}`, single question objects,
+     * and both numeric or string `id` / `correct_index` fields.
+     */
+    fun parseQuestionsDtoFromRawJson(rawText: String): List<GeneratedAiQuestionDto> {
+        val cleaned = cleanMarkdownJson(rawText)
+        if (cleaned.isBlank()) return emptyList()
+
+        try {
+            val direct = json.decodeFromString<List<GeneratedAiQuestionDto>>(cleaned)
+            if (direct.isNotEmpty()) return direct
+        } catch (_: Exception) {
+            // Fallback: inspect JsonElement tree for numeric IDs, flexible field names, or wrapper objects
+        }
+
+        return try {
+            val root: JsonElement = json.parseToJsonElement(cleaned)
+            val array: JsonArray = when (root) {
+                is JsonArray -> root
+                is JsonObject -> {
+                    val nestedArray = (root["questions"] ?: root["items"] ?: root["data"] ?: root["mcqs"] ?: root["results"]) as? JsonArray
+                        ?: root.values.firstOrNull { it is JsonArray && (it.firstOrNull() is JsonObject) } as? JsonArray
+                    nestedArray ?: JsonArray(listOf(root))
+                }
+                else -> return emptyList()
+            }
+            array.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                fun str(vararg keys: String): String {
+                    for (k in keys) {
+                        val v = (obj[k] as? JsonPrimitive)?.contentOrNull
+                        if (!v.isNullOrBlank() && !v.equals("null", ignoreCase = true)) {
+                            return v.trim()
+                        }
+                    }
+                    return ""
+                }
+                fun cleanOptionText(rawOpt: String): String {
+                    return rawOpt
+                        .replace(Regex("""^\s*[\(\[]?[A-Da-dক-ঘ1-4][\)\]\.\:\-]\s*"""), "")
+                        .trim()
+                        .ifBlank { rawOpt.trim() }
+                }
+                fun strList(vararg keys: String): List<String> {
+                    for (k in keys) {
+                        val el = obj[k]
+                        if (el is JsonArray && el.isNotEmpty()) {
+                            val list = el.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(::cleanOptionText) }
+                                .filter { it.isNotBlank() }
+                            if (list.isNotEmpty()) return list
+                        } else if (el is JsonObject && el.isNotEmpty()) {
+                            val list = el.values.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(::cleanOptionText) }
+                                .filter { it.isNotBlank() }
+                            if (list.isNotEmpty()) return list
+                        }
+                    }
+                    val fallbackFour = listOf(
+                        str("option_a", "optionA", "option_1", "option1", "a", "A"),
+                        str("option_b", "optionB", "option_2", "option2", "b", "B"),
+                        str("option_c", "optionC", "option_3", "option3", "c", "C"),
+                        str("option_d", "optionD", "option_4", "option4", "d", "D")
+                    ).map(::cleanOptionText).filter { it.isNotBlank() }
+                    return fallbackFour
+                }
+                val qBn = str("question_bn", "questionBn", "question", "question_text", "questionText", "question_en")
+                val qEn = str("question_en", "questionEn", "question", "question_text", "question_bn")
+                if (qBn.isBlank() && qEn.isBlank()) return@mapNotNull null
+
+                val optsBn = strList("options_bn", "optionsBn", "options", "choices", "options_en")
+                val optsEn = strList("options_en", "optionsEn", "options", "choices", "options_bn")
+                val rawCorrect = str("correct_index", "correctIndex", "answer_index", "correct_option", "correctOption", "answer")
+                val parsedCorrect = rawCorrect.toIntOrNull() ?: when (rawCorrect.uppercase().trim('(', ')', '[', ']', '.', ' ')) {
+                    "A", "ক", "OPT A", "OPTION A" -> 0
+                    "B", "খ", "OPT B", "OPTION B" -> 1
+                    "C", "গ", "OPT C", "OPTION C" -> 2
+                    "D", "ঘ", "OPT D", "OPTION D" -> 3
+                    else -> {
+                        val matchedIdx = optsBn.indexOfFirst {
+                            it.equals(rawCorrect, ignoreCase = true) || rawCorrect.contains(it, ignoreCase = true)
+                        }
+                        if (matchedIdx in 0..3) matchedIdx
+                        else (obj["correct_index"] as? JsonPrimitive)?.intOrNull ?: 0
+                    }
+                }
+                GeneratedAiQuestionDto(
+                    id = str("id"),
+                    subject = str("subject", "category").ifBlank { "GK" },
+                    questionBn = qBn.ifBlank { qEn },
+                    questionEn = qEn.ifBlank { qBn },
+                    optionsBn = optsBn.ifEmpty { optsEn },
+                    optionsEn = optsEn.ifEmpty { optsBn },
+                    correctIndex = parsedCorrect.coerceIn(0, 3),
+                    explanationBn = str("explanation_bn", "explanationBn", "explanation", "solution", "explanation_en"),
+                    explanationEn = str("explanation_en", "explanationEn", "explanation_bn", "explanation"),
+                    shortcutTrickBn = str("shortcut_trick_bn", "shortcutTrickBn", "shortcut", "trick"),
+                    examYearTag = str("exam_year_tag", "examYearTag", "exam_tag"),
+                    chapter = str("chapter", "chapter_id", "chapterId", "topic"),
+                    chapterId = str("chapter_id", "chapterId", "chapter", "topic")
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     fun isMcqGenerationRequest(prompt: String): Boolean {
@@ -730,141 +880,275 @@ object GeminiClient {
         }
     }
 
+    data class ScannerInlineAttachment(
+        val mimeType: String,
+        val base64Data: String,
+        val label: String = ""
+    )
+
+    data class BatchScanOutcome(
+        val questions: List<QuizQuestion>,
+        val errorMessage: String? = null,
+        val usedRealGeminiApi: Boolean = false
+    )
+
     /**
-     * PYQ Book PDF / Text Importer for the 4 SOPAN Academy WBP Warrior PYQ Books (GK, Math, Reasoning, English).
-     * Sends uploaded PDF/TXT content or pasted raw text to Gemini (`gemini-2.5-flash`) to extract every question,
-     * Year/Exam tag (e.g., `KP Constable Prelims 2023`, `WBP SI 2005`), 4 options in Bengali (or English for English section),
-     * correct answer index (0-3), and step-by-step Bengali explanation with bullet-point notes.
+     * Fetches text from a webpage URL pasted into the AI Smart Question Scanner.
+     */
+    suspend fun fetchWebpageTextFromUrl(url: String): String = withContext(Dispatchers.IO) {
+        val cleanUrl = url.trim()
+        if (!cleanUrl.startsWith("http://", ignoreCase = true) && !cleanUrl.startsWith("https://", ignoreCase = true)) {
+            return@withContext cleanUrl
+        }
+        try {
+            val req = okhttp3.Request.Builder()
+                .url(cleanUrl)
+                .header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) WbpKpSmartScanner/2.0")
+                .build()
+            okHttpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext "Source URL: $cleanUrl"
+                val html = resp.body?.string().orEmpty()
+                html.replace(Regex("(?is)<script.*?>.*?</script>"), " ")
+                    .replace(Regex("(?is)<style.*?>.*?</style>"), " ")
+                    .replace(Regex("<[^>]+>"), "\n")
+                    .replace("&nbsp;", " ")
+                    .replace("&amp;", "&")
+                    .replace(Regex("[ \\t]+"), " ")
+                    .replace(Regex("\\n{3,}"), "\n\n")
+                    .trim()
+                    .take(18000)
+                    .ifBlank { "Source URL: $cleanUrl" }
+            }
+        } catch (_: Exception) {
+            "Source URL: $cleanUrl"
+        }
+    }
+
+    /**
+     * Real Gemini 2.5 Flash Multimodal OCR Extraction:
+     * - Strips any `data:...;base64,` prefix from uploaded Image (`image/jpeg`, `image/png`, `image/webp`) or PDF (`application/pdf`).
+     * - Calls `gemini-2.5-flash` with `responseMimeType = "application/json"` and `temperature = 0.1f`.
+     * - Cleans markdown fences (`rawText.replace(/```json/gi, '').replace(/```/g, '').trim()`) before JSON parsing.
+     * - Zero dummy/fallback questions: if no readable questions are detected or an error occurs, returns an empty list
+     *   with `"No readable questions were detected in this image. Please upload a clearer photo."`.
+     */
+    suspend fun scanSmartQuestionBatchDetailed(
+        rawText: String,
+        attachments: List<ScannerInlineAttachment> = emptyList(),
+        pageBatchLabel: String = "Page 1 of 1",
+        subjectHint: String? = null,
+        batchSeedOffset: Int = 0,
+        customApiKey: String? = null
+    ): BatchScanOutcome = withContext(Dispatchers.IO) {
+        val effectiveApiKey = customApiKey?.trim()?.takeIf { isApiKeyConfigured(it) } ?: BuildConfig.GEMINI_API_KEY
+        val normHint = subjectHint?.uppercase()?.takeIf { it in listOf("GK", "MATH", "REASONING", "ENGLISH") }
+        val defaultSub = normHint ?: "GK"
+
+        if (!isApiKeyConfigured(effectiveApiKey)) {
+            return@withContext BatchScanOutcome(
+                questions = emptyList(),
+                errorMessage = "No readable questions were detected in this image. Please upload a clearer photo. (Gemini API Key is not configured in AI Studio Secrets.)",
+                usedRealGeminiApi = false
+            )
+        }
+
+        val ocrPrompt = """
+            Perform strict OCR on this uploaded image/PDF. Read the Bengali (বাংলা) and English text in the image clearly and carefully (for example, Bengali GK/Math/Reasoning questions like "সৌরজগতে মোট গ্রহের সংখ্যা কয়টি?" and its 4 options).
+            Extract ONLY the exact exam questions visible inside this file. Do NOT invent, hallucinate, or return unrelated sample questions.
+            For GK, Math, and Reasoning questions, output the question text (`question_bn`) and all 4 options (`options_bn`) in Bengali (বাংলা) script (translate accurately into Bengali if the source image is in English or Hindi).
+            For English grammar/vocabulary questions, keep the question and options in English.
+            Solve each question carefully to determine the exact `correct_index` (0, 1, 2, or 3), classify the `subject` ('GK', 'Math', 'Reasoning', or 'English') and `chapter`, and write a clear step-by-step `explanation_bn` in Bengali including a 30-second exam shortcut trick.
+            Return ONLY a valid JSON array of objects with keys: `id`, `subject`, `chapter`, `question_bn`, `options_bn` (array of 4 strings), `correct_index` (number 0-3), `explanation_bn`.
+        """.trimIndent()
+
+        val finalPromptText = if (rawText.isNotBlank() && !rawText.startsWith("Extract all MCQs")) {
+            "$ocrPrompt\n\nAdditional context ($pageBatchLabel):\n$rawText"
+        } else {
+            ocrPrompt
+        }
+
+        val partsList = mutableListOf<Part>()
+        attachments.forEach { att ->
+            val cleanBase64 = att.base64Data
+                .substringAfter("base64,", att.base64Data)
+                .replace(Regex("\\s+"), "")
+                .trim()
+            val normalizedMime = when {
+                att.mimeType.contains("pdf", ignoreCase = true) -> "application/pdf"
+                att.mimeType.contains("png", ignoreCase = true) -> "image/png"
+                att.mimeType.contains("webp", ignoreCase = true) -> "image/webp"
+                else -> "image/jpeg"
+            }
+            if (cleanBase64.isNotBlank()) {
+                partsList.add(
+                    Part(
+                        inlineData = InlineData(
+                            mimeType = normalizedMime,
+                            data = cleanBase64
+                        )
+                    )
+                )
+            }
+        }
+        partsList.add(Part(text = finalPromptText))
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(parts = partsList)),
+            generationConfig = GenerationConfig(
+                responseMimeType = "application/json",
+                temperature = 0.1f
+            )
+        )
+
+        val modelsToTry = listOf("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+
+        for (modelName in modelsToTry) {
+            try {
+                val response = service.generateContent(
+                    model = modelName,
+                    apiKey = effectiveApiKey,
+                    request = request
+                )
+                val allTextParts = response.candidates
+                    ?.asSequence()
+                    ?.mapNotNull { it.content?.parts }
+                    ?.flatten()
+                    ?.mapNotNull { it.text?.trim() }
+                    ?.filter { it.isNotBlank() }
+                    ?.toList()
+                    .orEmpty()
+
+                // Try parsing from the last part backwards (since Gemini 2.5 Flash puts thinking in part[0] and JSON in the last part)
+                var dtos: List<GeneratedAiQuestionDto> = emptyList()
+                for (partText in allTextParts.asReversed()) {
+                    val parsed = parseQuestionsDtoFromRawJson(partText)
+                    if (parsed.isNotEmpty()) {
+                        dtos = parsed
+                        break
+                    }
+                }
+                if (dtos.isEmpty() && allTextParts.isNotEmpty()) {
+                    dtos = parseQuestionsDtoFromRawJson(allTextParts.joinToString("\n"))
+                }
+
+                val ts = System.currentTimeMillis()
+                val extracted = dtos.mapIndexedNotNull { idx, dto ->
+                    val rawQuestionText = dto.questionBn.ifBlank { dto.questionEn }.trim()
+                    if (rawQuestionText.isBlank()) return@mapIndexedNotNull null
+
+                    val normSub = dto.subject.uppercase().let {
+                        when {
+                            it.contains("MATH") -> "MATH"
+                            it.contains("REASON") || it.contains("GI") -> "REASONING"
+                            it.contains("ENG") -> "ENGLISH"
+                            it.contains("GK") || it.contains("GENERAL") -> "GK"
+                            else -> defaultSub
+                        }
+                    }
+                    val baseOpts = when {
+                        dto.optionsBn.isNotEmpty() -> dto.optionsBn
+                        dto.optionsEn.isNotEmpty() -> dto.optionsEn
+                        else -> emptyList()
+                    }
+                    if (baseOpts.isEmpty()) return@mapIndexedNotNull null
+
+                    val optsBn = if (baseOpts.size >= 4) {
+                        baseOpts.take(4)
+                    } else {
+                        val padded = baseOpts.toMutableList()
+                        while (padded.size < 4) {
+                            padded.add("উপরের কোনোটিই নয় (${padded.size + 1})")
+                        }
+                        padded
+                    }
+                    val optsEn = if (dto.optionsEn.size >= 4) dto.optionsEn.take(4) else optsBn
+                    val rawChapter = dto.chapter.ifBlank { dto.chapterId }
+                    val matchedChapter = com.example.data.WbpPyqVaultSeed.findBestMatchingChapter(
+                        normSub,
+                        "$rawChapter $rawQuestionText"
+                    )
+                    val chapterLabel = rawChapter.ifBlank { matchedChapter.chapterId }
+                    val cleanExplanation = dto.explanationBn.ifBlank { dto.explanationEn }.ifBlank {
+                        "সঠিক উত্তর: অপশন (${listOf("A", "B", "C", "D")[dto.correctIndex.coerceIn(0, 3)]}) — ${optsBn[dto.correctIndex.coerceIn(0, 3)]}।"
+                    }.let { exp ->
+                        if (exp.contains("শর্টকাট ট্রিক") || dto.shortcutTrickBn.isBlank()) exp
+                        else "$exp\n• শর্টকাট ট্রিক: ${dto.shortcutTrickBn}"
+                    }
+                    QuizQuestion(
+                        id = "SMART_SCAN_${normSub}_${ts}_${batchSeedOffset}_$idx",
+                        subject = normSub,
+                        questionEn = dto.questionEn.ifBlank { rawQuestionText },
+                        questionBn = if (normSub == "ENGLISH") dto.questionEn.ifBlank { rawQuestionText } else rawQuestionText,
+                        optionsEn = optsEn,
+                        optionsBn = if (normSub == "ENGLISH") optsEn else optsBn,
+                        correctIndex = dto.correctIndex.coerceIn(0, 3),
+                        explanationEn = cleanExplanation,
+                        explanationBn = cleanExplanation,
+                        shortcutTrickBn = dto.shortcutTrickBn.ifBlank { "শর্টকাট ট্রিক: ৩০ সেকেন্ডে দ্রুত সমাধান কৌশল।" },
+                        shortcutTrickEn = dto.shortcutTrickBn.ifBlank { "30-Second Exam Hall Shortcut Trick." },
+                        examYearTag = dto.examYearTag.ifBlank { "Uploaded Image/PDF Scan" },
+                        chapterId = chapterLabel,
+                        examFamily = "USER_UPLOADED"
+                    )
+                }
+
+                if (extracted.isNotEmpty()) {
+                    return@withContext BatchScanOutcome(
+                        questions = extracted,
+                        errorMessage = null,
+                        usedRealGeminiApi = true
+                    )
+                }
+            } catch (_: Exception) {
+                // Try next model in fallback list
+            }
+        }
+
+        BatchScanOutcome(
+            questions = emptyList(),
+            errorMessage = "No readable questions were detected in this image. Please upload a clearer photo.",
+            usedRealGeminiApi = true
+        )
+    }
+
+    suspend fun scanSmartQuestionBatch(
+        rawText: String,
+        attachments: List<ScannerInlineAttachment> = emptyList(),
+        pageBatchLabel: String = "Page 1 of 1",
+        subjectHint: String? = null,
+        batchSeedOffset: Int = 0
+    ): Result<List<QuizQuestion>> {
+        val outcome = scanSmartQuestionBatchDetailed(
+            rawText = rawText,
+            attachments = attachments,
+            pageBatchLabel = pageBatchLabel,
+            subjectHint = subjectHint,
+            batchSeedOffset = batchSeedOffset
+        )
+        return Result.success(outcome.questions)
+    }
+
+    /**
+     * Backwards-compatible wrapper for single-call extraction.
      */
     suspend fun extractPyqsFromBookContent(
         rawText: String,
         base64Document: String? = null,
         documentMimeType: String? = null,
         subjectHint: String? = null
-    ): Result<List<QuizQuestion>> = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        val defaultSub = subjectHint?.uppercase() ?: "GK"
-        if (!isApiKeyConfigured(apiKey)) {
-            return@withContext Result.success(parseLocalBookTextFallback(rawText, defaultSub))
+    ): Result<List<QuizQuestion>> {
+        val attachments = if (!base64Document.isNullOrBlank() && !documentMimeType.isNullOrBlank()) {
+            listOf(ScannerInlineAttachment(mimeType = documentMimeType, base64Data = base64Document))
+        } else {
+            emptyList()
         }
-
-        val prompt = """
-            You are extracting authentic West Bengal Police (WBP) and Kolkata Police (KP) Previous Year Questions (PYQs, 2005–Present) from the SOPAN Academy WBP Warrior PYQ Book (${defaultSub} section).
-            Extract every multiple-choice question from the provided text/PDF.
-            For each question:
-            - `subject`: "GK", "MATH", "REASONING", or "ENGLISH" (default: "$defaultSub")
-            - `exam_year_tag`: Official exam and year tag if present (e.g., "KP Constable Prelims 2023", "WBP Constable Main 2022", "WBP SI 2005", "WBP Lady Constable Main 2024"), or "WBPRB PYQ Vault"
-            - `chapter_id`: Relevant SOPAN Academy chapter code (e.g., "GK_CH_01", "MATH_CH_01", "REAS_CH_01", "ENG_CH_01")
-            - `question_bn`: Full question text in natural Bengali (or English if subject is "ENGLISH")
-            - `question_en`: Full question text in English (or Bengali if unavailable)
-            - `options_bn`: Array of 4 options in Bengali (or English if subject is "ENGLISH")
-            - `options_en`: Array of 4 options
-            - `correct_index`: Integer 0, 1, 2, or 3 corresponding to (a), (b), (c), or (d)
-            - `explanation_bn`: Detailed step-by-step Bengali explanation (`ব্যাখ্যা:`) including bullet-point notes or 30-second shortcut tricks
-            - `shortcut_trick_bn`: Concise 1-line exam hall shortcut or memory tip in Bengali
-
-            Raw Book Content to Extract:
-            $rawText
-        """.trimIndent()
-
-        val schema = buildJsonObject {
-            put("type", "ARRAY")
-            putJsonObject("items") {
-                put("type", "OBJECT")
-                putJsonObject("properties") {
-                    putJsonObject("id") { put("type", "STRING") }
-                    putJsonObject("subject") { put("type", "STRING") }
-                    putJsonObject("exam_year_tag") { put("type", "STRING") }
-                    putJsonObject("chapter_id") { put("type", "STRING") }
-                    putJsonObject("question_bn") { put("type", "STRING") }
-                    putJsonObject("question_en") { put("type", "STRING") }
-                    putJsonObject("options_bn") {
-                        put("type", "ARRAY")
-                        putJsonObject("items") { put("type", "STRING") }
-                    }
-                    putJsonObject("options_en") {
-                        put("type", "ARRAY")
-                        putJsonObject("items") { put("type", "STRING") }
-                    }
-                    putJsonObject("correct_index") { put("type", "INTEGER") }
-                    putJsonObject("explanation_bn") { put("type", "STRING") }
-                    putJsonObject("shortcut_trick_bn") { put("type", "STRING") }
-                }
-                putJsonArray("required") {
-                    add(JsonPrimitive("subject"))
-                    add(JsonPrimitive("exam_year_tag"))
-                    add(JsonPrimitive("question_bn"))
-                    add(JsonPrimitive("options_bn"))
-                    add(JsonPrimitive("correct_index"))
-                    add(JsonPrimitive("explanation_bn"))
-                }
-            }
-        }
-
-        val partsList = mutableListOf<Part>(Part(text = prompt))
-        if (!base64Document.isNullOrBlank() && !documentMimeType.isNullOrBlank()) {
-            partsList.add(Part(inlineData = InlineData(mimeType = documentMimeType, data = base64Document)))
-        }
-
-        val request = GenerateContentRequest(
-            contents = listOf(Content(parts = partsList)),
-            systemInstruction = Content(parts = listOf(Part(text = WBPRB_SYSTEM_PROMPT))),
-            generationConfig = GenerationConfig(
-                responseMimeType = "application/json",
-                responseSchema = schema,
-                temperature = 0.25f
-            )
+        return scanSmartQuestionBatch(
+            rawText = rawText,
+            attachments = attachments,
+            pageBatchLabel = "Page 1 of 1",
+            subjectHint = subjectHint,
+            batchSeedOffset = (System.currentTimeMillis() % 900).toInt()
         )
-
-        try {
-            val response = service.generateContent(
-                model = "gemini-2.5-flash",
-                apiKey = apiKey,
-                request = request
-            )
-            val rawJson = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-            if (!rawJson.isNullOrBlank()) {
-                val dtos = json.decodeFromString<List<GeneratedAiQuestionDto>>(rawJson)
-                val ts = System.currentTimeMillis()
-                val extracted = dtos.mapIndexed { idx, dto ->
-                    val normSub = dto.subject.uppercase().let {
-                        when {
-                            it.contains("MATH") -> "MATH"
-                            it.contains("REASON") || it.contains("GI") -> "REASONING"
-                            it.contains("ENG") -> "ENGLISH"
-                            else -> defaultSub
-                        }
-                    }
-                    val optsBn = if (dto.optionsBn.size >= 4) dto.optionsBn.take(4)
-                    else if (dto.optionsEn.size >= 4) dto.optionsEn.take(4)
-                    else listOf("বিকল্প A", "বিকল্প B", "বিকল্প C", "বিকল্প D")
-                    val optsEn = if (dto.optionsEn.size >= 4) dto.optionsEn.take(4) else optsBn
-                    QuizQuestion(
-                        id = dto.id.ifBlank { "IMPORTED_PYQ_${normSub}_${ts}_$idx" },
-                        subject = normSub,
-                        questionEn = dto.questionEn.ifBlank { dto.questionBn },
-                        questionBn = if (normSub == "ENGLISH") dto.questionEn.ifBlank { dto.questionBn } else dto.questionBn.ifBlank { dto.questionEn },
-                        optionsEn = optsEn,
-                        optionsBn = if (normSub == "ENGLISH") optsEn else optsBn,
-                        correctIndex = dto.correctIndex.coerceIn(0, 3),
-                        explanationEn = dto.explanationBn.ifBlank { dto.explanationEn },
-                        explanationBn = dto.explanationBn.ifBlank { dto.explanationEn },
-                        shortcutTrickBn = dto.shortcutTrickBn.ifBlank { "SOPAN Academy WBP Warrior PYQ নোট।" },
-                        shortcutTrickEn = dto.shortcutTrickBn.ifBlank { "SOPAN Academy WBP Warrior PYQ Note." },
-                        examYearTag = dto.examYearTag.ifBlank { "WBPRB PYQ (2005–Present)" },
-                        chapterId = dto.chapterId.ifBlank { "${normSub}_CH_01" },
-                        examFamily = inferExamFamilyFromTag(dto.examYearTag)
-                    )
-                }
-                if (extracted.isNotEmpty()) {
-                    return@withContext Result.success(extracted)
-                }
-            }
-        } catch (_: Exception) {
-            // Fall through to local parser
-        }
-
-        Result.success(parseLocalBookTextFallback(rawText, defaultSub))
     }
 
     /**
@@ -879,7 +1163,7 @@ object GeminiClient {
         targetCount: Int = 50
     ): List<QuizQuestion> = withContext(Dispatchers.IO) {
         val normSub = subject.uppercase()
-        val programmaticBatch = com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
+        val programmaticBatch = com.example.data.WbpPyqVaultSeed.generateProgrammaticBatch(
             subject = normSub,
             chapterId = chapterId,
             startOffset = startSeedIndex,
@@ -896,7 +1180,7 @@ object GeminiClient {
             Generate 12 brand-new, non-repeating WBPRB (WBP/KP Constable & SI 2005–Present pattern) MCQs for Subject: $normSub, Topic/Chapter: $topicFocus.
             - For GK, MATH, and REASONING: write `question_bn`, `options_bn` (4 options), and `explanation_bn` in natural Bengali (বাংলা) with bullet-point notes and 30-second shortcuts.
             - For ENGLISH: write `question_en` and `options_en` in English, and `explanation_bn` in Bengali (বাংলা).
-            - Include realistic `exam_year_tag` values like "WBP Constable Practice (PYQ Pattern)", "KP Constable Prelims Pattern", "WBP SI Pattern".
+            - Include realistic `exam_year_tag` values like "WBP Constable PYQ", "KP Constable Prelims Pattern", "WBP SI Pattern".
             Return a JSON array.
         """.trimIndent()
 
@@ -936,7 +1220,7 @@ object GeminiClient {
                         explanationBn = dto.explanationBn.ifBlank { dto.explanationEn },
                         shortcutTrickBn = dto.shortcutTrickBn.ifBlank { "WBPRB ৩০ সেকেন্ডের শর্টকাট ট্রিক।" },
                         shortcutTrickEn = dto.shortcutTrickBn.ifBlank { "WBPRB 30s Shortcut Trick." },
-                        examYearTag = dto.examYearTag.ifBlank { "WBPRB PYQ-Pattern Vault" },
+                        examYearTag = dto.examYearTag.ifBlank { "WBPRB Official PYQ Vault (2005–Present)" },
                         chapterId = chapterId ?: dto.chapterId.ifBlank { "${normSub}_CH_01" },
                         examFamily = inferExamFamilyFromTag(dto.examYearTag)
                     )
@@ -948,6 +1232,80 @@ object GeminiClient {
         }
 
         programmaticBatch
+    }
+
+    /**
+     * 1-Click AI Shortcut Explanation Helper ("✨ Auto-Generate Bengali Shortcut"):
+     * Calls `gemini-2.5-flash` with the user's typed question, 4 options, and selected correct answer
+     * to generate a concise, step-by-step Bengali explanation (`explanation_bn`) so the user doesn't have to type it manually.
+     */
+    suspend fun generateBengaliShortcutExplanation(
+        subject: String,
+        chapter: String,
+        questionText: String,
+        options: List<String>,
+        correctIndex: Int,
+        customApiKey: String? = null
+    ): String = withContext(Dispatchers.IO) {
+        val safeOptions = (options + listOf("Option A", "Option B", "Option C", "Option D")).take(4)
+        val correctLetter = listOf("A", "B", "C", "D").getOrElse(correctIndex.coerceIn(0, 3)) { "A" }
+        val correctOptionText = safeOptions.getOrElse(correctIndex.coerceIn(0, 3)) { "" }
+
+        val candidateKey = customApiKey?.trim()?.takeIf { isApiKeyConfigured(it) }
+            ?: BuildConfig.GEMINI_API_KEY.trim().takeIf { isApiKeyConfigured(it) }
+
+        val defaultFallbackExplanation = buildString {
+            append("✅ সঠিক উত্তর: ($correctLetter) $correctOptionText।\n")
+            when (subject.uppercase()) {
+                "MATH" -> append("⚡ শর্টকাট ট্রিক ($chapter): প্রদত্ত মানগুলো সরাসরি সূত্রে বসিয়ে ভগ্নাংশ বা অনুপাত পদ্ধতিতে ১০–২০ সেকেন্ডে উত্তর ($correctOptionText) নির্ণয় করা যায়।")
+                "REASONING" -> append("⚡ লজিক ও শর্টকাট ($chapter): প্রদত্ত ক্রম/চিত্রের প্যাটার্ন ও সম্পর্ক বিশ্লেষণ করলে সঠিক বিকল্প ($correctLetter) $correctOptionText পাওয়া যায়।")
+                "ENGLISH" -> append("⚡ ব্যাকরণ ও অর্থ ($chapter): প্রদত্ত বাক্যের সঠিক গ্রামার নিয়ম ও প্রসঙ্গ অনুযায়ী সঠিক উত্তর হলো ($correctLetter) $correctOptionText।")
+                else -> append("📌 গুরুত্বপূর্ণ তথ্য ($chapter): WBPRB পরীক্ষার জন্য এই তথ্যটি অত্যন্ত গুরুত্বপূর্ণ—সঠিক উত্তর ($correctLetter) $correctOptionText।")
+            }
+        }
+
+        if (candidateKey.isNullOrBlank()) {
+            return@withContext defaultFallbackExplanation
+        }
+
+        val prompt = """
+            You are an expert West Bengal Police (WBP & KP) exam faculty.
+            Write a concise, high-scoring step-by-step explanation and 30-second exam shortcut in Bengali (বাংলা) for the following MCQ:
+            - Subject: $subject
+            - Chapter: $chapter
+            - Question: $questionText
+            - Options:
+              (A) ${safeOptions[0]}
+              (B) ${safeOptions[1]}
+              (C) ${safeOptions[2]}
+              (D) ${safeOptions[3]}
+            - Correct Answer: ($correctLetter) $correctOptionText
+
+            Rules:
+            - Write the entire explanation in clear, natural Bengali (বাংলা) script.
+            - Keep it concise (2 to 4 bullet points or short lines), including a quick "⚡ শর্টকাট ট্রিক / মূল তথ্য" line.
+            - Return ONLY the plain Bengali explanation text (no markdown code blocks, no JSON).
+        """.trimIndent()
+
+        try {
+            val request = GenerateContentRequest(
+                contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+                generationConfig = GenerationConfig(temperature = 0.2f)
+            )
+            val response = service.generateContent(
+                model = "gemini-2.5-flash",
+                apiKey = candidateKey,
+                request = request
+            )
+            val generated = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+            if (!generated.isNullOrBlank()) {
+                return@withContext generated.replace("```", "").trim()
+            }
+        } catch (_: Exception) {
+            // Fallback to deterministic Bengali explanation
+        }
+
+        defaultFallbackExplanation
     }
 
     private fun inferExamFamilyFromTag(tag: String): String {
@@ -963,59 +1321,6 @@ object GeminiClient {
             else -> "WBP_CONSTABLE"
         }
     }
-
-    private fun parseLocalBookTextFallback(rawText: String, defaultSub: String): List<QuizQuestion> {
-        val clean = rawText.trim()
-        if (clean.isBlank()) {
-            return com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(defaultSub, null, (System.currentTimeMillis() % 500).toInt() + 50, 10)
-        }
-        val blocks = clean.split(Regex("\\n\\s*\\n+|(?=\\[?(?:KP|WBP|PSC|Excise|WBPRB))"))
-            .map { it.trim() }
-            .filter { it.length > 15 }
-
-        val parsed = mutableListOf<QuizQuestion>()
-        val ts = System.currentTimeMillis()
-        blocks.forEachIndexed { idx, block ->
-            val lines = block.lines().map { it.trim() }.filter { it.isNotBlank() }
-            if (lines.isNotEmpty()) {
-                val firstLine = lines.first()
-                val yearRegex = Regex("\\[(.*?)\\]|\\((?:WBP|KP|PSC|Excise).*?\\d{4}\\)")
-                val match = yearRegex.find(block)
-                val yearTag = match?.value?.trim('[', ']', '(', ')') ?: "SOPAN Book Imported PYQ"
-                val qText = firstLine.replace(yearRegex, "").trim().ifBlank { firstLine }
-                val explanationLine = lines.firstOrNull {
-                    it.startsWith("ব্যাখ্যা") || it.startsWith("সমাধান") || it.startsWith("উত্তর") || it.lowercase().startsWith("ans")
-                } ?: "SOPAN Academy WBP Warrior PYQ Book থেকে ইমপোর্ট করা প্রশ্ন ও সমাধান।"
-
-                parsed.add(
-                    QuizQuestion(
-                        id = "BOOK_IMP_${defaultSub}_${ts}_$idx",
-                        subject = defaultSub,
-                        questionEn = qText,
-                        questionBn = qText,
-                        optionsEn = listOf("Option A", "Option B", "Option C", "Option D"),
-                        optionsBn = if (defaultSub == "ENGLISH") {
-                            listOf("Option A", "Option B", "Option C", "Option D")
-                        } else {
-                            listOf("বিকল্প (a)", "বিকল্প (b)", "বিকল্প (c)", "বিকল্প (d)")
-                        },
-                        correctIndex = 0,
-                        explanationEn = explanationLine,
-                        explanationBn = explanationLine,
-                        shortcutTrickBn = "SOPAN Academy PYQ Book রেফারেন্স নোট।",
-                        shortcutTrickEn = "SOPAN Academy PYQ Book Reference Note.",
-                        examYearTag = yearTag,
-                        chapterId = "${defaultSub}_CH_01",
-                        examFamily = inferExamFamilyFromTag(yearTag)
-                    )
-                )
-            }
-        }
-        return if (parsed.isNotEmpty()) parsed else com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
-            defaultSub,
-            null,
-            (System.currentTimeMillis() % 400).toInt() + 100,
-            10
-        )
-    }
 }
+
+

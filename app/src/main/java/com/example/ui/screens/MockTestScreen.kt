@@ -111,6 +111,14 @@ fun MockTestScreen(
     seenQuestionIds: Set<String> = emptySet(),
     bulkGeneratingTarget: String? = null,
     isImportingPyqBook: Boolean = false,
+    scannerCurrentPage: Int = 0,
+    scannerTotalPages: Int = 0,
+    scannerAddedCount: Int = 0,
+    scannerExtractedCount: Int = 0,
+    scannerStep: Int = 0,
+    scannerErrorMessage: String? = null,
+    scannerVerificationReport: com.example.data.ScanVerificationReport? = null,
+    scannerToastMessage: String? = null,
     currentIndex: Int,
     selectedAnswers: Map<String, Int>,
     markedForReview: Set<String>,
@@ -140,7 +148,19 @@ fun MockTestScreen(
     onGenerateAiSectionalTest: (String) -> Unit = {},
     onBulkAdd50Questions: (String, String?, String?) -> Unit = { _, _, _ -> },
     onImportPyqBookContent: (String, String?, String?, String) -> Unit = { _, _, _, _ -> },
-    onStartChapterTest: (com.example.data.SopanChapterSpec) -> Unit = {},
+    onScanSmartBatch: (String, List<com.example.network.GeminiClient.ScannerInlineAttachment>, Int, String?) -> Unit = { _, _, _, _ -> },
+    onClearScannerToast: () -> Unit = {},
+    onClearScannerError: () -> Unit = {},
+    onNotifyScannerInputLoaded: () -> Unit = {},
+    onUpdateUploadedQuestion: (QuizQuestion) -> Unit = {},
+    onDeleteUploadedQuestion: (String) -> Unit = {},
+    onStartUploadedQuestionsTest: (List<QuizQuestion>) -> Unit = {},
+    isGeneratingExplanation: Boolean = false,
+    onSaveManualBatch: (List<QuizQuestion>) -> Unit = {},
+    onExportDatabaseJson: ((String) -> Unit) -> Unit = {},
+    onImportDatabaseJson: (String) -> Unit = {},
+    onAutoGenerateExplanation: (String, String, String, List<String>, Int, (String) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
+    onStartChapterTest: (com.example.data.WbpChapterSpec) -> Unit = {},
     onStartExamGroupTest: (com.example.data.WbpExamHistoryGroup, String?) -> Unit = { _, _ -> },
     onResetSeenHistory: () -> Unit = {},
     onToggleExamPause: () -> Unit = {},
@@ -193,6 +213,14 @@ fun MockTestScreen(
             seenQuestionIds = seenQuestionIds,
             bulkGeneratingTarget = bulkGeneratingTarget,
             isImportingPyqBook = isImportingPyqBook,
+            scannerCurrentPage = scannerCurrentPage,
+            scannerTotalPages = scannerTotalPages,
+            scannerAddedCount = scannerAddedCount,
+            scannerExtractedCount = scannerExtractedCount,
+            scannerStep = scannerStep,
+            scannerErrorMessage = scannerErrorMessage,
+            scannerVerificationReport = scannerVerificationReport,
+            scannerToastMessage = scannerToastMessage,
             mistakeNotebook = mistakeNotebook,
             completedTestScores = completedTestScores,
             isGeneratingAiMock = isGeneratingAiMock,
@@ -208,6 +236,18 @@ fun MockTestScreen(
             onGenerateAiSectionalTest = onGenerateAiSectionalTest,
             onBulkAdd50Questions = onBulkAdd50Questions,
             onImportPyqBookContent = onImportPyqBookContent,
+            onScanSmartBatch = onScanSmartBatch,
+            onClearScannerToast = onClearScannerToast,
+            onClearScannerError = onClearScannerError,
+            onNotifyScannerInputLoaded = onNotifyScannerInputLoaded,
+            onUpdateUploadedQuestion = onUpdateUploadedQuestion,
+            onDeleteUploadedQuestion = onDeleteUploadedQuestion,
+            onStartUploadedQuestionsTest = onStartUploadedQuestionsTest,
+            isGeneratingExplanation = isGeneratingExplanation,
+            onSaveManualBatch = onSaveManualBatch,
+            onExportDatabaseJson = onExportDatabaseJson,
+            onImportDatabaseJson = onImportDatabaseJson,
+            onAutoGenerateExplanation = onAutoGenerateExplanation,
             onStartChapterTest = onStartChapterTest,
             onStartExamGroupTest = onStartExamGroupTest,
             onResetSeenHistory = onResetSeenHistory,
@@ -219,8 +259,8 @@ fun MockTestScreen(
 }
 
 /**
- * Part 2: Subject-Wise Test Series Hub & SOPAN PYQ Vault (Testbook App Style)
- * Includes horizontal filter pills: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [Mistake Retry]
+ * Part 2: Subject-Wise Test Series Hub & WBPRB Official PYQ Vault (2005–Present) (Testbook App Style)
+ * Includes horizontal filter pills: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [🗂️ Manage Question Database], [Mistake Retry]
  */
 @Composable
 private fun TestSeriesHubView(
@@ -229,6 +269,14 @@ private fun TestSeriesHubView(
     seenQuestionIds: Set<String>,
     bulkGeneratingTarget: String?,
     isImportingPyqBook: Boolean,
+    scannerCurrentPage: Int,
+    scannerTotalPages: Int,
+    scannerAddedCount: Int,
+    scannerExtractedCount: Int,
+    scannerStep: Int,
+    scannerErrorMessage: String?,
+    scannerVerificationReport: com.example.data.ScanVerificationReport?,
+    scannerToastMessage: String?,
     mistakeNotebook: List<MistakeNotebookEntity>,
     completedTestScores: Map<String, Pair<Double, Int>>,
     isGeneratingAiMock: Boolean,
@@ -244,7 +292,19 @@ private fun TestSeriesHubView(
     onGenerateAiSectionalTest: (String) -> Unit,
     onBulkAdd50Questions: (String, String?, String?) -> Unit,
     onImportPyqBookContent: (String, String?, String?, String) -> Unit,
-    onStartChapterTest: (com.example.data.SopanChapterSpec) -> Unit,
+    onScanSmartBatch: (String, List<com.example.network.GeminiClient.ScannerInlineAttachment>, Int, String?) -> Unit,
+    onClearScannerToast: () -> Unit,
+    onClearScannerError: () -> Unit,
+    onNotifyScannerInputLoaded: () -> Unit,
+    onUpdateUploadedQuestion: (QuizQuestion) -> Unit,
+    onDeleteUploadedQuestion: (String) -> Unit,
+    onStartUploadedQuestionsTest: (List<QuizQuestion>) -> Unit,
+    isGeneratingExplanation: Boolean,
+    onSaveManualBatch: (List<QuizQuestion>) -> Unit,
+    onExportDatabaseJson: ((String) -> Unit) -> Unit,
+    onImportDatabaseJson: (String) -> Unit,
+    onAutoGenerateExplanation: (String, String, String, List<String>, Int, (String) -> Unit) -> Unit,
+    onStartChapterTest: (com.example.data.WbpChapterSpec) -> Unit,
     onStartExamGroupTest: (com.example.data.WbpExamHistoryGroup, String?) -> Unit,
     onResetSeenHistory: () -> Unit,
     onResumeActiveLiveExam: () -> Unit,
@@ -258,13 +318,35 @@ private fun TestSeriesHubView(
     val allSeries = WbpSampleData.testSeriesItems
     val fullMockSeries = remember(allSeries) { allSeries.filter { it.isFullMock } }
     val sectionalSeries = remember(allSeries) { allSeries.filter { !it.isFullMock } }
+    val totalVaultCount = questionVault.size
 
     if (showPyqImporterModal) {
         PyqBookImporterDialog(
             isBn = isBn,
             isImporting = isImportingPyqBook,
+            scannerCurrentPage = scannerCurrentPage,
+            scannerTotalPages = scannerTotalPages,
+            scannerAddedCount = scannerAddedCount,
+            scannerExtractedCount = scannerExtractedCount,
+            scannerStep = scannerStep,
+            scannerErrorMessage = scannerErrorMessage,
+            scannerVerificationReport = scannerVerificationReport,
+            scannerToastMessage = scannerToastMessage,
+            questionVault = questionVault,
+            isGeneratingExplanation = isGeneratingExplanation,
+            onClearToastMessage = onClearScannerToast,
+            onClearErrorMessage = onClearScannerError,
+            onNotifyInputLoaded = onNotifyScannerInputLoaded,
+            onUpdateUploadedQuestion = onUpdateUploadedQuestion,
+            onDeleteUploadedQuestion = onDeleteUploadedQuestion,
+            onStartUploadedQuestionsTest = onStartUploadedQuestionsTest,
             onDismiss = { showPyqImporterModal = false },
-            onImportBookContent = onImportPyqBookContent
+            onImportBookContent = onImportPyqBookContent,
+            onScanSmartBatch = onScanSmartBatch,
+            onSaveManualBatch = onSaveManualBatch,
+            onAutoGenerateExplanation = onAutoGenerateExplanation,
+            onExportDatabaseJson = onExportDatabaseJson,
+            onImportDatabaseJson = onImportDatabaseJson
         )
     }
 
@@ -275,7 +357,7 @@ private fun TestSeriesHubView(
         contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Horizontal Filter Pill Bar: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [Mistake Retry]
+        // Horizontal Filter Pill Bar: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [🗂️ Manage Question Database (Count)], [Mistake Retry]
         item {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -283,6 +365,12 @@ private fun TestSeriesHubView(
             ) {
                 items(TestSeriesFilter.entries) { filter ->
                     val isSelected = selectedFilter == filter
+                    val baseLabel = if (isBn) filter.labelBn else filter.labelEn
+                    val pillLabel = if (filter == TestSeriesFilter.MY_UPLOADED) {
+                        "$baseLabel ($totalVaultCount)"
+                    } else {
+                        baseLabel
+                    }
                     Surface(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
@@ -302,7 +390,7 @@ private fun TestSeriesHubView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (isBn) filter.labelBn else filter.labelEn,
+                                text = pillLabel,
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                                 color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
@@ -313,13 +401,16 @@ private fun TestSeriesHubView(
             }
         }
 
-        // Top Question Vault Master Bar + "📥 Import PYQ PDF / Book Text" Button
+        // Top Question Vault Master Bar + "✍️ Manual Question Studio (Add 1–50 Questions)" Button
         item {
             QuestionVaultMasterBar(
                 isBn = isBn,
                 questionVault = questionVault,
                 seenQuestionIds = seenQuestionIds,
                 isImportingBook = isImportingPyqBook,
+                scannerCurrentPage = scannerCurrentPage,
+                scannerTotalPages = scannerTotalPages,
+                scannerAddedCount = scannerAddedCount,
                 onOpenImporterModal = { showPyqImporterModal = true },
                 onResetSeenHistory = onResetSeenHistory
             )
@@ -481,6 +572,23 @@ private fun TestSeriesHubView(
             }
         }
 
+        // SECTION 0: MANAGE QUESTION DATABASE (Database Explorer, Filter, Edit/Delete & 1-Click JSON Backup)
+        if (selectedFilter == TestSeriesFilter.MY_UPLOADED || selectedFilter == TestSeriesFilter.ALL) {
+            item {
+                MyUploadedQuestionsVaultSection(
+                    isBn = isBn,
+                    uploadedQuestions = questionVault,
+                    onStartUploadedTest = onStartUploadedQuestionsTest,
+                    onOpenScannerModal = { showPyqImporterModal = true },
+                    onUpdateUploadedQuestion = onUpdateUploadedQuestion,
+                    onDeleteUploadedQuestion = onDeleteUploadedQuestion,
+                    onExportDatabaseJson = onExportDatabaseJson,
+                    onImportDatabaseJson = onImportDatabaseJson,
+                    initiallyExpandedList = selectedFilter == TestSeriesFilter.MY_UPLOADED
+                )
+            }
+        }
+
         // SECTION 1: FULL MOCK (85M) SERIES
         if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.FULL_MOCK) {
             item {
@@ -564,10 +672,10 @@ private fun TestSeriesHubView(
             }
         }
 
-        // SECTION 4: CHAPTER-WISE PRACTICE (53 SOPAN ACADEMY CHAPTERS ACROSS GK, MATH, REASONING, ENGLISH)
+        // SECTION 4: CHAPTER-WISE PRACTICE (53 OFFICIAL WBP & KP CHAPTERS ACROSS GK, MATH, REASONING, ENGLISH)
         if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.CHAPTER_WISE) {
             item {
-                SopanChapterWiseSection(
+                WbpChapterWiseSection(
                     isBn = isBn,
                     questionVault = questionVault,
                     seenQuestionIds = seenQuestionIds,
@@ -1492,19 +1600,40 @@ private fun TestbookLiveExamView(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            val effectiveYearTag = currentQuestion.examYearTag.ifBlank { "WBPRB Expected Pattern" }
-                            Surface(
-                                color = AmberWarning.copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.padding(bottom = 8.dp)
+                            val effectiveYearTag = currentQuestion.effectivePyqBadge().ifBlank {
+                                currentQuestion.examYearTag.ifBlank { "WBPRB Expected Pattern" }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "[$effectiveYearTag]",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AmberWarning,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "${currentQuestion.subject} • ${currentQuestion.effectiveChapterName()}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Surface(
+                                    color = AmberWarning.copy(alpha = 0.14f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "[$effectiveYearTag]",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AmberWarning,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
                             }
 
                             // Question Text — ALWAYS in Bengali for GK, Math, Reasoning; English for English Grammar
@@ -1516,15 +1645,26 @@ private fun TestbookLiveExamView(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
+                            // Reasoning Question Figure / Diagram (with Tap-to-Zoom Full-Screen Preview)
+                            if (currentQuestion.hasQuestionImage()) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                QuestionDiagramCard(
+                                    base64Image = currentQuestion.questionImage,
+                                    modifier = Modifier.testTag("live_exam_question_diagram")
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(14.dp))
 
                             // Clean MCQ Option Rows — ALWAYS in Bengali for GK, Math, Reasoning; English for English Grammar
+                            // Supports Reasoning Option Images inside each Option A/B/C/D card
                             val options = currentQuestion.displayOptions()
                             val chosenOption = selectedAnswers[currentQuestion.id]
                             val bubbleLetters = listOf("A", "B", "C", "D")
 
                             options.forEachIndexed { optIdx, optText ->
                                 val isSelected = chosenOption == optIdx
+                                val optImgBase64 = currentQuestion.optionImageAt(optIdx)
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1536,7 +1676,7 @@ private fun TestbookLiveExamView(
                                     color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
                                     else MaterialTheme.colorScheme.surface
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .border(
@@ -1545,35 +1685,49 @@ private fun TestbookLiveExamView(
                                                 shape = RoundedCornerShape(12.dp)
                                             )
                                             .padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (isSelected) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.surfaceVariant
-                                                ),
-                                            contentAlignment = Alignment.Center
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (isSelected) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.surfaceVariant
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = bubbleLetters.getOrElse(optIdx) { "" },
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.width(12.dp))
+
                                             Text(
-                                                text = bubbleLetters.getOrElse(optIdx) { "" },
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                                text = optText,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
                                             )
                                         }
 
-                                        Spacer(modifier = Modifier.width(12.dp))
-
-                                        Text(
-                                            text = optText,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        if (optImgBase64.isNotBlank()) {
+                                            OptionDiagramThumbnail(
+                                                base64Image = optImgBase64,
+                                                modifier = Modifier
+                                                    .padding(start = 40.dp)
+                                                    .testTag("live_exam_option_diagram_$optIdx")
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1796,6 +1950,13 @@ private fun TestbookLiveExamView(
                                 fontWeight = FontWeight.SemiBold
                             )
 
+                            if (q.hasQuestionImage()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                QuestionDiagramCard(
+                                    base64Image = q.questionImage
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(8.dp))
 
                             if (userChoice != null && !isCorrect) {
@@ -1806,6 +1967,11 @@ private fun TestbookLiveExamView(
                                     color = CrimsonWrong,
                                     fontWeight = FontWeight.Medium
                                 )
+                                val chosenOptImg = q.optionImageAt(userChoice)
+                                if (chosenOptImg.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OptionDiagramThumbnail(base64Image = chosenOptImg)
+                                }
                             }
 
                             Text(
@@ -1815,6 +1981,11 @@ private fun TestbookLiveExamView(
                                 color = EmeraldSuccess,
                                 fontWeight = FontWeight.SemiBold
                             )
+                            val correctOptImg = q.optionImageAt(q.correctIndex)
+                            if (correctOptImg.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                OptionDiagramThumbnail(base64Image = correctOptImg)
+                            }
 
                             Spacer(modifier = Modifier.height(10.dp))
 
