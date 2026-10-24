@@ -115,6 +115,10 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
     val chatMessages by wbpViewModel.chatMessages.collectAsStateWithLifecycle()
     val mistakeNotebook by wbpViewModel.mistakeNotebook.collectAsStateWithLifecycle()
     val bookmarkedQuestionIds by wbpViewModel.bookmarkedQuestionIds.collectAsStateWithLifecycle()
+    val questionVault by wbpViewModel.questionVault.collectAsStateWithLifecycle()
+    val seenQuestionIds by wbpViewModel.seenQuestionIds.collectAsStateWithLifecycle()
+    val bulkGeneratingTarget by wbpViewModel.bulkGeneratingTarget.collectAsStateWithLifecycle()
+    val isImportingPyqBook by wbpViewModel.isImportingPyqBook.collectAsStateWithLifecycle()
 
     val questions by wbpViewModel.questions.collectAsStateWithLifecycle()
     val currentQuestionIndex by wbpViewModel.currentQuestionIndex.collectAsStateWithLifecycle()
@@ -261,11 +265,17 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         syllabusTopics = syllabusTopics,
                         mockResults = mockResults,
                         mistakeNotebook = mistakeNotebook,
+                        questionVault = questionVault,
+                        seenQuestionIds = seenQuestionIds,
+                        bulkGeneratingTarget = bulkGeneratingTarget,
                         onSelectExam = { wbpViewModel.selectExam(it) },
                         onStartQuickQuiz = { wbpViewModel.startQuickDailyQuiz() },
                         onStartRetryMistakes = { wbpViewModel.startRetryMistakesQuiz() },
                         onRemoveMistake = { wbpViewModel.removeFromMistakeNotebook(it) },
                         onStartSubjectPractice = { wbpViewModel.startFullPracticeSet(it) },
+                        onBulkAdd50Questions = { subjectId ->
+                            wbpViewModel.bulkAdd50QuestionsToVault(subjectId, null)
+                        },
                         onOpenSyllabus = {
                             openSyllabusInFlashcardsMode = false
                             wbpViewModel.selectTab(BottomNavTab.SYLLABUS)
@@ -303,6 +313,10 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         totalDurationSeconds = totalDurationSeconds,
                         isGeneratingAiMock = isGeneratingAiMock,
                         statusBanner = mockStatusBanner,
+                        questionVault = questionVault,
+                        seenQuestionIds = seenQuestionIds,
+                        bulkGeneratingTarget = bulkGeneratingTarget,
+                        isImportingPyqBook = isImportingPyqBook,
                         getPaletteStatus = { wbpViewModel.getPaletteStatus(it) },
                         onSelectQuestion = { wbpViewModel.goToQuestion(it) },
                         onSelectOption = { qId, opt -> wbpViewModel.selectOmrOption(qId, opt) },
@@ -313,6 +327,17 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         onStartTestSeriesItem = { wbpViewModel.startTestSeriesItem(it) },
                         onViewSolutionsForTestSeriesItem = { wbpViewModel.viewSolutionsForTestSeriesItem(it) },
                         onGenerateAiSectionalTest = { wbpViewModel.generateAiSectionalTest(it) },
+                        onBulkAdd50Questions = { subjectId, chapterId, chapterTitle ->
+                            wbpViewModel.bulkAdd50QuestionsToVault(subjectId, chapterId, chapterTitle)
+                        },
+                        onImportPyqBookContent = { rawText, base64Doc, docMime, subjectHint ->
+                            wbpViewModel.importPyqBookContent(rawText, base64Doc, docMime, subjectHint)
+                        },
+                        onStartChapterTest = { wbpViewModel.startChapterPracticeTest(it) },
+                        onStartExamGroupTest = { group, subjectFilter ->
+                            wbpViewModel.startPyqExamGroupTest(group.id, group.labelEn, group.labelBn, subjectFilter)
+                        },
+                        onResetSeenHistory = { wbpViewModel.resetSeenQuestionsHistory() },
                         onToggleExamPause = { wbpViewModel.toggleExamPause() },
                         onExitLiveExamToHub = { wbpViewModel.exitLiveExamToHub() },
                         onResumeActiveLiveExam = { wbpViewModel.resumeOrOpenActiveLiveExam() },

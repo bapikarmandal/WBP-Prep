@@ -138,6 +138,78 @@ data class MistakeNotebookEntity(
     }
 }
 
+@Entity(tableName = "question_vault")
+data class QuestionVaultEntity(
+    @PrimaryKey val id: String,
+    val subject: String,
+    val questionEn: String,
+    val questionBn: String,
+    val optionsEnJson: String,
+    val optionsBnJson: String,
+    val correctIndex: Int,
+    val explanationEn: String,
+    val explanationBn: String,
+    val shortcutTrickBn: String = "",
+    val shortcutTrickEn: String = "",
+    val examYearTag: String = "",
+    val chapterId: String = "",
+    val examFamily: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toQuizQuestion(): QuizQuestion {
+        val optionsEn = try {
+            Json.decodeFromString(ListSerializer(String.serializer()), optionsEnJson)
+        } catch (_: Exception) {
+            listOf("Option A", "Option B", "Option C", "Option D")
+        }
+        val optionsBn = try {
+            Json.decodeFromString(ListSerializer(String.serializer()), optionsBnJson)
+        } catch (_: Exception) {
+            optionsEn
+        }
+        return QuizQuestion(
+            id = id,
+            subject = subject,
+            questionEn = questionEn,
+            questionBn = questionBn,
+            optionsEn = optionsEn,
+            optionsBn = optionsBn,
+            correctIndex = correctIndex,
+            explanationEn = explanationEn,
+            explanationBn = explanationBn,
+            shortcutTrickBn = shortcutTrickBn,
+            shortcutTrickEn = shortcutTrickEn,
+            examYearTag = examYearTag,
+            chapterId = chapterId,
+            examFamily = examFamily
+        )
+    }
+
+    companion object {
+        fun fromQuizQuestion(q: QuizQuestion): QuestionVaultEntity {
+            val optionsEnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsEn)
+            val optionsBnJson = Json.encodeToString(ListSerializer(String.serializer()), q.optionsBn)
+            return QuestionVaultEntity(
+                id = q.id,
+                subject = q.subject,
+                questionEn = q.questionEn,
+                questionBn = q.questionBn,
+                optionsEnJson = optionsEnJson,
+                optionsBnJson = optionsBnJson,
+                correctIndex = q.correctIndex,
+                explanationEn = q.explanationEn,
+                explanationBn = q.explanationBn,
+                shortcutTrickBn = q.shortcutTrickBn,
+                shortcutTrickEn = q.shortcutTrickEn,
+                examYearTag = q.examYearTag,
+                chapterId = q.chapterId,
+                examFamily = q.examFamily,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+}
+
 @Dao
 interface WbpDao {
     @Query("SELECT * FROM syllabus_topics")
@@ -193,6 +265,18 @@ interface WbpDao {
 
     @Query("DELETE FROM mistake_notebook WHERE questionId = :id")
     suspend fun deleteMistakeQuestion(id: String)
+
+    @Query("SELECT * FROM question_vault ORDER BY timestamp ASC")
+    fun getAllVaultQuestions(): Flow<List<QuestionVaultEntity>>
+
+    @Query("SELECT * FROM question_vault")
+    suspend fun getAllVaultQuestionsList(): List<QuestionVaultEntity>
+
+    @Query("SELECT COUNT(*) FROM question_vault")
+    suspend fun getVaultQuestionCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVaultQuestions(items: List<QuestionVaultEntity>)
 }
 
 @Database(
@@ -201,9 +285,10 @@ interface WbpDao {
         MockTestResultEntity::class,
         PetRunLogEntity::class,
         ChatMessageEntity::class,
-        MistakeNotebookEntity::class
+        MistakeNotebookEntity::class,
+        QuestionVaultEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -233,6 +318,7 @@ class WbpRepository(private val dao: WbpDao) {
     val petRunLogs: Flow<List<PetRunLogEntity>> = dao.getAllPetRunLogs()
     val chatMessages: Flow<List<ChatMessageEntity>> = dao.getAllChatMessages()
     val mistakeNotebook: Flow<List<MistakeNotebookEntity>> = dao.getAllMistakeQuestions()
+    val questionVaultEntities: Flow<List<QuestionVaultEntity>> = dao.getAllVaultQuestions()
 
     suspend fun ensureSeedData() {
         if (dao.getSyllabusCount() == 0) {
@@ -283,6 +369,41 @@ class WbpRepository(private val dao: WbpDao) {
                 )
             }
         }
+        if (dao.getVaultQuestionCount() == 0) {
+            // Seed the Question Vault with all authentic SOPAN Academy PYQs (2005–Present) + preloaded bank
+            val initialQuestions = (SopanPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
+                .distinctBy { it.displayQuestionText().trim().lowercase() }
+            dao.insertVaultQuestions(initialQuestions.map { QuestionVaultEntity.fromQuizQuestion(it) })
+        }
+    }
+
+    /**
+     * Deduplicates against existing questions in the vault (by ID and normalized question text)
+     * and permanently appends new MCQs up to 1,000+ per subject.
+     * Returns the count of newly inserted unique questions.
+     */
+    suspend fun bulkAddUniqueQuestionsToVault(newQuestions: List<QuizQuestion>): Int {
+        val existingList = dao.getAllVaultQuestionsList()
+        val existingIds = existingList.map { it.id }.toMutableSet()
+        val existingTexts = existingList.map {
+            (if (it.subject.equals("ENGLISH", ignoreCase = true)) it.questionEn else it.questionBn)
+                .trim()
+                .lowercase()
+        }.toMutableSet()
+
+        val uniqueToInsert = mutableListOf<QuestionVaultEntity>()
+        for (q in newQuestions) {
+            val normText = q.displayQuestionText().trim().lowercase()
+            if (normText.isNotBlank() && normText !in existingTexts && q.id !in existingIds) {
+                existingIds.add(q.id)
+                existingTexts.add(normText)
+                uniqueToInsert.add(QuestionVaultEntity.fromQuizQuestion(q))
+            }
+        }
+        if (uniqueToInsert.isNotEmpty()) {
+            dao.insertVaultQuestions(uniqueToInsert)
+        }
+        return uniqueToInsert.size
     }
 
     suspend fun toggleSyllabusTopic(topic: SyllabusTopicEntity) {

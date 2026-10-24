@@ -107,6 +107,10 @@ private enum class SolutionFilter(val labelEn: String, val labelBn: String) {
 fun MockTestScreen(
     language: AppLanguage,
     questions: List<QuizQuestion>,
+    questionVault: List<QuizQuestion> = emptyList(),
+    seenQuestionIds: Set<String> = emptySet(),
+    bulkGeneratingTarget: String? = null,
+    isImportingPyqBook: Boolean = false,
     currentIndex: Int,
     selectedAnswers: Map<String, Int>,
     markedForReview: Set<String>,
@@ -134,6 +138,11 @@ fun MockTestScreen(
     onStartTestSeriesItem: (TestSeriesItem) -> Unit = {},
     onViewSolutionsForTestSeriesItem: (TestSeriesItem) -> Unit = {},
     onGenerateAiSectionalTest: (String) -> Unit = {},
+    onBulkAdd50Questions: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onImportPyqBookContent: (String, String?, String?, String) -> Unit = { _, _, _, _ -> },
+    onStartChapterTest: (com.example.data.SopanChapterSpec) -> Unit = {},
+    onStartExamGroupTest: (com.example.data.WbpExamHistoryGroup, String?) -> Unit = { _, _ -> },
+    onResetSeenHistory: () -> Unit = {},
     onToggleExamPause: () -> Unit = {},
     onExitLiveExamToHub: () -> Unit = {},
     onResumeActiveLiveExam: () -> Unit = {},
@@ -178,6 +187,10 @@ fun MockTestScreen(
     } else {
         TestSeriesHubView(
             language = language,
+            questionVault = questionVault,
+            seenQuestionIds = seenQuestionIds,
+            bulkGeneratingTarget = bulkGeneratingTarget,
+            isImportingPyqBook = isImportingPyqBook,
             mistakeNotebook = mistakeNotebook,
             completedTestScores = completedTestScores,
             isGeneratingAiMock = isGeneratingAiMock,
@@ -191,6 +204,11 @@ fun MockTestScreen(
             onViewSolutionsForTestSeriesItem = onViewSolutionsForTestSeriesItem,
             onGenerateAiMock = onGenerateAiMock,
             onGenerateAiSectionalTest = onGenerateAiSectionalTest,
+            onBulkAdd50Questions = onBulkAdd50Questions,
+            onImportPyqBookContent = onImportPyqBookContent,
+            onStartChapterTest = onStartChapterTest,
+            onStartExamGroupTest = onStartExamGroupTest,
+            onResetSeenHistory = onResetSeenHistory,
             onResumeActiveLiveExam = onResumeActiveLiveExam,
             onRetryMistakes = onRetryMistakes,
             onRemoveMistake = onRemoveMistake
@@ -199,12 +217,16 @@ fun MockTestScreen(
 }
 
 /**
- * Part 2: Subject-Wise Test Series Hub (Testbook App Style)
- * Includes horizontal filter pills: [All Tests], [Full Mock (85M)], [Subject-Wise], [Mistake Retry]
+ * Part 2: Subject-Wise Test Series Hub & SOPAN PYQ Vault (Testbook App Style)
+ * Includes horizontal filter pills: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [Mistake Retry]
  */
 @Composable
 private fun TestSeriesHubView(
     language: AppLanguage,
+    questionVault: List<QuizQuestion>,
+    seenQuestionIds: Set<String>,
+    bulkGeneratingTarget: String?,
+    isImportingPyqBook: Boolean,
     mistakeNotebook: List<MistakeNotebookEntity>,
     completedTestScores: Map<String, Pair<Double, Int>>,
     isGeneratingAiMock: Boolean,
@@ -218,16 +240,31 @@ private fun TestSeriesHubView(
     onViewSolutionsForTestSeriesItem: (TestSeriesItem) -> Unit,
     onGenerateAiMock: () -> Unit,
     onGenerateAiSectionalTest: (String) -> Unit,
+    onBulkAdd50Questions: (String, String?, String?) -> Unit,
+    onImportPyqBookContent: (String, String?, String?, String) -> Unit,
+    onStartChapterTest: (com.example.data.SopanChapterSpec) -> Unit,
+    onStartExamGroupTest: (com.example.data.WbpExamHistoryGroup, String?) -> Unit,
+    onResetSeenHistory: () -> Unit,
     onResumeActiveLiveExam: () -> Unit,
     onRetryMistakes: () -> Unit,
     onRemoveMistake: (String) -> Unit
 ) {
     val isBn = language == AppLanguage.BENGALI
     var selectedFilter by remember { mutableStateOf(TestSeriesFilter.ALL) }
+    var showPyqImporterModal by remember { mutableStateOf(false) }
 
     val allSeries = WbpSampleData.testSeriesItems
     val fullMockSeries = remember(allSeries) { allSeries.filter { it.isFullMock } }
     val sectionalSeries = remember(allSeries) { allSeries.filter { !it.isFullMock } }
+
+    if (showPyqImporterModal) {
+        PyqBookImporterDialog(
+            isBn = isBn,
+            isImporting = isImportingPyqBook,
+            onDismiss = { showPyqImporterModal = false },
+            onImportBookContent = onImportPyqBookContent
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -236,7 +273,7 @@ private fun TestSeriesHubView(
         contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Horizontal Filter Pill Bar: [All Tests], [Full Mock (85M)], [Subject-Wise], [Mistake Retry]
+        // Horizontal Filter Pill Bar: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [Mistake Retry]
         item {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -272,6 +309,18 @@ private fun TestSeriesHubView(
                     }
                 }
             }
+        }
+
+        // Top Question Vault Master Bar + "📥 Import PYQ PDF / Book Text" Button
+        item {
+            QuestionVaultMasterBar(
+                isBn = isBn,
+                questionVault = questionVault,
+                seenQuestionIds = seenQuestionIds,
+                isImportingBook = isImportingPyqBook,
+                onOpenImporterModal = { showPyqImporterModal = true },
+                onResetSeenHistory = onResetSeenHistory
+            )
         }
 
         // Status / AI Generation Banner + Quick Open Live OMR Strip
@@ -443,14 +492,21 @@ private fun TestSeriesHubView(
             }
 
             items(fullMockSeries, key = { it.id }) { testItem ->
+                val savedInVault = questionVault.size
+                val unseenInVault = questionVault.count { it.id !in seenQuestionIds }
                 TestbookSeriesCard(
                     isBn = isBn,
                     item = testItem,
+                    savedVaultCount = savedInVault,
+                    unseenVaultCount = unseenInVault,
+                    targetVaultCapacity = 4000,
                     completedScore = completedTestScores[testItem.id],
                     isGeneratingSectional = false,
+                    isBulkAdding50 = false,
                     onStartTest = { onStartTestSeriesItem(testItem) },
                     onViewSolutions = { onViewSolutionsForTestSeriesItem(testItem) },
-                    onGenerateAiSectional = null
+                    onGenerateAiSectional = null,
+                    onBulkAdd50ToVault = null
                 )
             }
         }
@@ -472,19 +528,57 @@ private fun TestSeriesHubView(
 
             items(sectionalSeries, key = { it.id }) { testItem ->
                 val subCode = testItem.subjectFilter ?: "GK"
+                val subQuestions = questionVault.filter { it.subject.equals(subCode, ignoreCase = true) }
+                val subSaved = subQuestions.size
+                val subUnseen = subQuestions.count { it.id !in seenQuestionIds }
                 TestbookSeriesCard(
                     isBn = isBn,
                     item = testItem,
+                    savedVaultCount = subSaved,
+                    unseenVaultCount = subUnseen,
+                    targetVaultCapacity = 1000,
                     completedScore = completedTestScores[testItem.id],
                     isGeneratingSectional = generatingSubjectSectional.equals(subCode, ignoreCase = true),
+                    isBulkAdding50 = bulkGeneratingTarget.equals(subCode, ignoreCase = true),
                     onStartTest = { onStartTestSeriesItem(testItem) },
                     onViewSolutions = { onViewSolutionsForTestSeriesItem(testItem) },
-                    onGenerateAiSectional = { onGenerateAiSectionalTest(subCode) }
+                    onGenerateAiSectional = { onGenerateAiSectionalTest(subCode) },
+                    onBulkAdd50ToVault = { onBulkAdd50Questions(subCode, null, testItem.titleEn) }
                 )
             }
         }
 
-        // SECTION 3: MISTAKE RETRY & BOOKMARKS NOTEBOOK
+        // SECTION 3: PYQ VAULT (2005–PRESENT) ARCHIVE
+        if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.PYQ_VAULT) {
+            item {
+                PyqVaultArchiveSection(
+                    isBn = isBn,
+                    questionVault = questionVault,
+                    seenQuestionIds = seenQuestionIds,
+                    bulkGeneratingTarget = bulkGeneratingTarget,
+                    onStartExamGroupTest = onStartExamGroupTest,
+                    onBulkAdd50Questions = onBulkAdd50Questions
+                )
+            }
+        }
+
+        // SECTION 4: CHAPTER-WISE PRACTICE (53 SOPAN ACADEMY CHAPTERS ACROSS GK, MATH, REASONING, ENGLISH)
+        if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.CHAPTER_WISE) {
+            item {
+                SopanChapterWiseSection(
+                    isBn = isBn,
+                    questionVault = questionVault,
+                    seenQuestionIds = seenQuestionIds,
+                    bulkGeneratingTarget = bulkGeneratingTarget,
+                    onStartChapterTest = onStartChapterTest,
+                    onBulkAdd50ForChapter = { chap ->
+                        onBulkAdd50Questions(chap.subject, chap.id, chap.titleEn)
+                    }
+                )
+            }
+        }
+
+        // SECTION 5: MISTAKE RETRY & BOOKMARKS NOTEBOOK
         if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.MISTAKE_RETRY) {
             item {
                 MistakeNotebookSectionCard(
@@ -506,11 +600,16 @@ private fun TestSeriesHubView(
 private fun TestbookSeriesCard(
     isBn: Boolean,
     item: TestSeriesItem,
+    savedVaultCount: Int,
+    unseenVaultCount: Int,
+    targetVaultCapacity: Int = 1000,
     completedScore: Pair<Double, Int>?,
     isGeneratingSectional: Boolean,
+    isBulkAdding50: Boolean,
     onStartTest: () -> Unit,
     onViewSolutions: () -> Unit,
-    onGenerateAiSectional: (() -> Unit)?
+    onGenerateAiSectional: (() -> Unit)?,
+    onBulkAdd50ToVault: (() -> Unit)?
 ) {
     Card(
         modifier = Modifier
@@ -601,6 +700,14 @@ private fun TestbookSeriesCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            // Live Counter Badge: [Saved in Vault: X / 1000 Questions • Unseen: Y]
+            VaultCounterBadge(
+                savedCount = savedVaultCount,
+                unseenCount = unseenVaultCount,
+                targetCapacity = targetVaultCapacity,
+                modifier = Modifier.testTag("vault_counter_${item.id}")
+            )
 
             // Questions • Marks • Time Badges
             Row(
@@ -693,6 +800,16 @@ private fun TestbookSeriesCard(
                         )
                     }
                 }
+            }
+
+            // "⚡ Bulk Add +50 New PYQ-Pattern Questions to Vault" button inside every Subject-Wise Test card
+            if (onBulkAdd50ToVault != null) {
+                BulkAdd50VaultButton(
+                    isBn = isBn,
+                    isLoading = isBulkAdding50,
+                    testTag = "bulk_add_50_${item.subjectFilter}",
+                    onClick = onBulkAdd50ToVault
+                )
             }
 
             // "⚡ Generate New AI Sectional Test" button inside each Subject-Wise Test card
@@ -1325,7 +1442,23 @@ private fun TestbookLiveExamView(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            if (currentQuestion.examYearTag.isNotBlank()) {
+                                Surface(
+                                    color = AmberWarning.copy(alpha = 0.14f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "[${currentQuestion.examYearTag}]",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AmberWarning,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
 
                             // Question Text — ALWAYS in Bengali for GK, Math, Reasoning; English for English Grammar
                             Text(
@@ -1550,6 +1683,20 @@ private fun TestbookLiveExamView(
                                         style = MaterialTheme.typography.labelLarge,
                                         color = MaterialTheme.colorScheme.primary
                                     )
+                                    if (q.examYearTag.isNotBlank()) {
+                                        Surface(
+                                            color = AmberWarning.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "[${q.examYearTag}]",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = AmberWarning,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                     Surface(
                                         color = qTimeColor.copy(alpha = 0.12f),
                                         shape = RoundedCornerShape(6.dp)

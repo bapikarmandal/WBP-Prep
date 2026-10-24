@@ -95,7 +95,10 @@ data class QuizQuestion(
     val explanationEn: String,
     val explanationBn: String,
     val shortcutTrickBn: String = "",
-    val shortcutTrickEn: String = ""
+    val shortcutTrickEn: String = "",
+    val examYearTag: String = "",
+    val chapterId: String = "",
+    val examFamily: String = ""
 ) {
     /**
      * Decouples App UI language from Exam Question language:
@@ -140,6 +143,8 @@ enum class TestSeriesFilter(val id: String, val labelEn: String, val labelBn: St
     ALL("ALL", "All Tests", "সব টেস্ট (All)"),
     FULL_MOCK("FULL_MOCK", "Full Mock (85M)", "ফুল মক (85M)"),
     SUBJECT_WISE("SUBJECT_WISE", "Subject-Wise", "বিষয়ভিত্তিক (Subject-Wise)"),
+    PYQ_VAULT("PYQ_VAULT", "PYQ Vault (2005–Present)", "PYQ ভল্ট (২০০৫–বর্তমান)"),
+    CHAPTER_WISE("CHAPTER_WISE", "Chapter-Wise Practice", "অধ্যায়ভিত্তিক (Chapter-Wise)"),
     MISTAKE_RETRY("MISTAKE_RETRY", "Mistake Retry", "ভুল রি-টেস্ট (Mistake Retry)")
 }
 

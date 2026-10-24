@@ -83,8 +83,28 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         .map { list -> list.filter { it.isBookmarked }.map { it.questionId }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    // Master Question Vault (1,000+ capacity per subject, 4,000+ total across GK, Math, Reasoning, English)
+    private val initialSeedVault = rememberInitialSeedVault()
+    val questionVault: StateFlow<List<QuizQuestion>> = repository.questionVaultEntities
+        .map { entities ->
+            if (entities.isEmpty()) initialSeedVault else entities.map { it.toQuizQuestion() }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialSeedVault)
+
+    // Non-Repeating Question Bank Engine: seenQuestionIds persisted in SharedPreferences
+    private val _seenQuestionIds = MutableStateFlow<Set<String>>(
+        prefs.getStringSet("seen_question_ids", emptySet())?.toSet() ?: emptySet()
+    )
+    val seenQuestionIds: StateFlow<Set<String>> = _seenQuestionIds.asStateFlow()
+
+    private val _bulkGeneratingTarget = MutableStateFlow<String?>(null)
+    val bulkGeneratingTarget: StateFlow<String?> = _bulkGeneratingTarget.asStateFlow()
+
+    private val _isImportingPyqBook = MutableStateFlow(false)
+    val isImportingPyqBook: StateFlow<Boolean> = _isImportingPyqBook.asStateFlow()
+
     // Live OMR Mock Test & Testbook Exam Hub State
-    private val _questions = MutableStateFlow<List<QuizQuestion>>(WbpSampleData.preloadedQuestions)
+    private val _questions = MutableStateFlow<List<QuizQuestion>>(initialSeedVault.take(25))
     val questions: StateFlow<List<QuizQuestion>> = _questions.asStateFlow()
 
     private val _currentQuestionIndex = MutableStateFlow(0)
@@ -97,7 +117,7 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     val markedForReview: StateFlow<Set<String>> = _markedForReview.asStateFlow()
 
     private val _visitedQuestions = MutableStateFlow<Set<String>>(
-        setOfNotNull(WbpSampleData.preloadedQuestions.firstOrNull()?.id)
+        setOfNotNull(initialSeedVault.firstOrNull()?.id)
     )
     val visitedQuestions: StateFlow<Set<String>> = _visitedQuestions.asStateFlow()
 
@@ -175,6 +195,226 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         }
         startOrResetTimer(600)
         resetInterviewForDistrict(_selectedDistrict.value)
+    }
+
+    private fun rememberInitialSeedVault(): List<QuizQuestion> {
+        return (com.example.data.SopanPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
+            .distinctBy { it.displayQuestionText().trim().lowercase() }
+    }
+
+    private fun markQuestionsAsSeen(questionsToMark: List<QuizQuestion>) {
+        if (questionsToMark.isEmpty()) return
+        val updated = _seenQuestionIds.value + questionsToMark.map { it.id }
+        _seenQuestionIds.value = updated
+        prefs.edit().putStringSet("seen_question_ids", updated).apply()
+    }
+
+    fun resetSeenQuestionsHistory() {
+        _seenQuestionIds.value = emptySet()
+        prefs.edit().remove("seen_question_ids").apply()
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "🔄 দেখা প্রশ্নের তালিকা (Seen History) রিসেট করা হয়েছে—সব ভল্ট প্রশ্ন আবার নতুন হিসেবে পাওয়া যাবে!"
+        else
+            "🔄 Seen question history reset — all Vault questions are now marked Unseen!"
+    }
+
+    /**
+     * Non-Repeating Question Bank Engine:
+     * Strictly filters out any question ID already inside `seenQuestionIds` so questions NEVER repeat across tests.
+     * If unseen questions in the vault for the target filter are fewer than `targetCount`, automatically generates
+     * and persists fresh non-repeating PYQ-pattern questions into the vault on the fly.
+     */
+    private fun pickNonRepeatingQuestions(
+        subjectFilter: String? = null,
+        chapterId: String? = null,
+        examFamily: String? = null,
+        targetCount: Int = 25
+    ): List<QuizQuestion> {
+        val currentSeen = _seenQuestionIds.value
+        val fullVault = questionVault.value.ifEmpty { initialSeedVault }
+
+        val matchingPool = fullVault.filter { q ->
+            val subOk = subjectFilter == null || q.subject.equals(subjectFilter, ignoreCase = true)
+            val chapOk = chapterId == null || q.chapterId.equals(chapterId, ignoreCase = true)
+            val examOk = examFamily == null || examFamily == "ALL_EXAMS" || q.examFamily.equals(examFamily, ignoreCase = true)
+            subOk && chapOk && examOk
+        }
+
+        val unseenPool = matchingPool.filter { it.id !in currentSeen }
+        val selected = mutableListOf<QuizQuestion>()
+
+        if (subjectFilter == null && chapterId == null && examFamily == null && targetCount >= 30) {
+            // Balanced Full Mock across all 4 subjects from unseen pool
+            val gkUnseen = unseenPool.filter { it.subject == "GK" }.shuffled()
+            val mathUnseen = unseenPool.filter { it.subject == "MATH" }.shuffled()
+            val reasUnseen = unseenPool.filter { it.subject == "REASONING" }.shuffled()
+            val engUnseen = unseenPool.filter { it.subject == "ENGLISH" }.shuffled()
+
+            val gkTarget = (targetCount * 25) / 85
+            val mathTarget = (targetCount * 25) / 85
+            val reasTarget = (targetCount * 25) / 85
+            val engTarget = max(1, targetCount - (gkTarget + mathTarget + reasTarget))
+
+            selected.addAll(gkUnseen.take(gkTarget))
+            selected.addAll(mathUnseen.take(mathTarget))
+            selected.addAll(reasUnseen.take(reasTarget))
+            selected.addAll(engUnseen.take(engTarget))
+        } else {
+            selected.addAll(unseenPool.shuffled().take(targetCount))
+        }
+
+        // If unseen pool had fewer than targetCount, generate brand-new non-repeating questions on the fly and save to vault
+        if (selected.size < targetCount) {
+            val needed = targetCount - selected.size
+            val targetSub = subjectFilter ?: "GK"
+            val offsetSeed = fullVault.size + currentSeen.size + 101
+            val freshGenerated = com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
+                subject = targetSub,
+                chapterId = chapterId,
+                startOffset = offsetSeed,
+                count = needed + 15
+            ).filter { it.id !in currentSeen && selected.none { s -> s.id == it.id } }
+
+            val toUse = freshGenerated.take(needed)
+            selected.addAll(toUse)
+            viewModelScope.launch {
+                repository.bulkAddUniqueQuestionsToVault(freshGenerated)
+            }
+        }
+
+        markQuestionsAsSeen(selected)
+        return selected
+    }
+
+    /**
+     * Permanently appends +50 new unique PYQ-Pattern Bengali MCQs to the Question Vault for a Subject or Chapter
+     * until the subject hits 1,000+ questions.
+     */
+    fun bulkAdd50QuestionsToVault(
+        subject: String,
+        chapterId: String? = null,
+        chapterTitle: String? = null
+    ) {
+        if (_bulkGeneratingTarget.value != null) return
+        val targetKey = chapterId ?: subject.uppercase()
+        _bulkGeneratingTarget.value = targetKey
+
+        val currentSubjectCount = questionVault.value.count { it.subject.equals(subject, ignoreCase = true) }
+        if (currentSubjectCount >= 1000) {
+            _bulkGeneratingTarget.value = null
+            _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+                "🏆 $subject ভল্টে ইতিমধ্যে $currentSubjectCount / ১০০০+ প্রশ্ন সংরক্ষিত আছে!"
+            else
+                "🏆 $subject Vault already has $currentSubjectCount / 1000+ questions!"
+            return
+        }
+
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "⚡ Gemini AI ও PYQ ইঞ্জিন +৫০টি নতুন প্রশ্ন ভল্টে যোগ করছে..."
+        else
+            "⚡ Adding +50 new unique PYQ-Pattern Bengali questions to Vault..."
+
+        viewModelScope.launch {
+            val batch = GeminiClient.generateBulkVaultQuestions(
+                subject = subject,
+                chapterId = chapterId,
+                chapterTitle = chapterTitle,
+                startSeedIndex = questionVault.value.size + 1,
+                targetCount = 55
+            )
+            var inserted = repository.bulkAddUniqueQuestionsToVault(batch)
+            if (inserted < 50) {
+                val extra = com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
+                    subject = subject.uppercase(),
+                    chapterId = chapterId,
+                    startOffset = questionVault.value.size + inserted + 500,
+                    count = 55 - inserted
+                )
+                inserted += repository.bulkAddUniqueQuestionsToVault(extra)
+            }
+            _bulkGeneratingTarget.value = null
+            val newSubTotal = questionVault.value.count { it.subject.equals(subject, ignoreCase = true) } + inserted
+            _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+                "✅ +$inserted টি নতুন ইউনিক PYQ-প্যাটার্ন প্রশ্ন ভল্টে স্থায়ীভাবে সেভ হয়েছে! ($subject ভল্ট: $newSubTotal / ১০০০)"
+            else
+                "✅ Permanently added +$inserted new unique PYQ-pattern questions to Vault! ($subject Vault: $newSubTotal / 1000)"
+        }
+    }
+
+    /**
+     * Imports PYQs from the 4 SOPAN Academy WBP Warrior PYQ Books (PDF/TXT file or pasted text) via `gemini-2.5-flash`
+     * and permanently stores them in the non-repeating Question Vault.
+     */
+    fun importPyqBookContent(
+        rawText: String,
+        base64Document: String? = null,
+        documentMimeType: String? = null,
+        subjectHint: String = "GK"
+    ) {
+        if (_isImportingPyqBook.value) return
+        _isImportingPyqBook.value = true
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "📥 Gemini 2.5 Flash SOPAN Academy বুক থেকে PYQ প্রশ্ন, সাল ও ব্যাখ্যা এক্সট্র্যাক্ট করছে..."
+        else
+            "📥 Gemini 2.5 Flash is extracting PYQ questions, exam year tags & Bengali explanations..."
+
+        viewModelScope.launch {
+            val res = GeminiClient.extractPyqsFromBookContent(
+                rawText = rawText,
+                base64Document = base64Document,
+                documentMimeType = documentMimeType,
+                subjectHint = subjectHint
+            )
+            val extractedList = res.getOrDefault(emptyList())
+            val addedCount = repository.bulkAddUniqueQuestionsToVault(extractedList)
+            _isImportingPyqBook.value = false
+            _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+                "✅ SOPAN বুক থেকে ${extractedList.size}টি প্রশ্ন শনাক্ত হয়েছে এবং $addedCount টি নতুন প্রশ্ন স্থায়ীভাবে ভল্টে যুক্ত হয়েছে!"
+            else
+                "✅ Extracted ${extractedList.size} PYQs ($addedCount brand-new unique questions saved to Vault)!"
+        }
+    }
+
+    fun startChapterPracticeTest(chapter: com.example.data.SopanChapterSpec) {
+        _isRetryMistakesMode.value = false
+        _activeTestId.value = "CHAPTER_${chapter.id}"
+        _activeTestTitleEn.value = "${chapter.subject} • ${chapter.numberCode}. ${chapter.titleEn}"
+        _activeTestTitleBn.value = "${chapter.subject} • ${chapter.numberCode}. ${chapter.titleBn}"
+        val selected = pickNonRepeatingQuestions(
+            subjectFilter = chapter.subject,
+            chapterId = chapter.id,
+            targetCount = 15
+        )
+        _questions.value = selected
+        resetOmrSession(durationSeconds = max(300, selected.size * 42))
+        _isExamPaused.value = false
+        _isLiveExamActive.value = true
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "📘 অধ্যায়ভিত্তিক প্র্যাকটিস: ${chapter.titleBn} (${selected.size}টি আনসিন প্রশ্ন)"
+        else
+            "📘 Chapter Practice: ${chapter.titleEn} (${selected.size} Unseen Questions)"
+        _currentTab.value = BottomNavTab.MOCK_TEST
+    }
+
+    fun startPyqExamGroupTest(examGroupId: String, examGroupLabelEn: String, examGroupLabelBn: String, subjectFilter: String? = null) {
+        _isRetryMistakesMode.value = false
+        _activeTestId.value = "PYQ_EXAM_${examGroupId}_${subjectFilter ?: "ALL"}"
+        _activeTestTitleEn.value = "PYQ Archive: $examGroupLabelEn"
+        _activeTestTitleBn.value = "PYQ আর্কাইভ: $examGroupLabelBn"
+        val selected = pickNonRepeatingQuestions(
+            subjectFilter = subjectFilter,
+            examFamily = examGroupId,
+            targetCount = 20
+        )
+        _questions.value = selected
+        resetOmrSession(durationSeconds = max(300, selected.size * 42))
+        _isExamPaused.value = false
+        _isLiveExamActive.value = true
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "🏛️ বিগত বছরের প্রশ্নপত্র (২০০৫–বর্তমান): $examGroupLabelBn (${selected.size}টি আনসিন প্রশ্ন)"
+        else
+            "🏛️ Official PYQ Archive (2005–Present): $examGroupLabelEn (${selected.size} Unseen Questions)"
+        _currentTab.value = BottomNavTab.MOCK_TEST
     }
 
     private fun loadCompletedScores(): Map<String, Pair<Double, Int>> {
@@ -282,7 +522,10 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         _activeTestId.value = item.id
         _activeTestTitleEn.value = item.titleEn
         _activeTestTitleBn.value = item.titleBn
-        _questions.value = WbpSampleData.buildQuestionsForTest(item.subjectFilter, item.questionCount)
+        _questions.value = pickNonRepeatingQuestions(
+            subjectFilter = item.subjectFilter,
+            targetCount = item.questionCount
+        )
         resetOmrSession(durationSeconds = item.durationMinutes * 60)
         _isExamPaused.value = false
         _isLiveExamActive.value = true
@@ -295,7 +538,11 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         _activeTestId.value = item.id
         _activeTestTitleEn.value = item.titleEn
         _activeTestTitleBn.value = item.titleBn
-        _questions.value = WbpSampleData.buildQuestionsForTest(item.subjectFilter, item.questionCount)
+        val subset = questionVault.value.let { vault ->
+            if (item.subjectFilter == null) vault.take(item.questionCount)
+            else vault.filter { it.subject.equals(item.subjectFilter, ignoreCase = true) }.take(item.questionCount)
+        }
+        _questions.value = subset.ifEmpty { WbpSampleData.buildQuestionsForTest(item.subjectFilter, item.questionCount) }
         resetOmrSession(durationSeconds = item.durationMinutes * 60)
         timerJob?.cancel()
         _isTestSubmitted.value = true
@@ -308,14 +555,14 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         _activeTestId.value = "DAILY_QUIZ_10"
         _activeTestTitleEn.value = "10-Minute Daily Speed Quiz"
         _activeTestTitleBn.value = "১০ মিনিটের ডেইলি স্পিড কুইজ"
-        _questions.value = WbpSampleData.preloadedQuestions.shuffled().take(10)
+        _questions.value = pickNonRepeatingQuestions(subjectFilter = null, targetCount = 10)
         resetOmrSession(durationSeconds = 600)
         _isExamPaused.value = false
         _isLiveExamActive.value = true
         _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-            "⚡ ১০ মিনিটের ডেইলি কুইজ শুরু হয়েছে! (+1 / -0.25 নেগেটিভ মার্কিং)"
+            "⚡ ১০ মিনিটের ডেইলি কুইজ শুরু হয়েছে! (নন-রিপিটিং ভল্ট প্রশ্ন • +1 / -0.25)"
         else
-            "⚡ 10-Minute Quick Daily Quiz Started! (+1 / -0.25 Negative Marking)"
+            "⚡ 10-Minute Quick Daily Quiz Started! (Non-Repeating Vault Questions • +1 / -0.25)"
         _currentTab.value = BottomNavTab.MOCK_TEST
     }
 
@@ -328,12 +575,8 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         _isRetryMistakesMode.value = false
-        val list = if (subjectFilter == null) {
-            WbpSampleData.preloadedQuestions
-        } else {
-            WbpSampleData.preloadedQuestions.filter { it.subject == subjectFilter }
-        }
-        _questions.value = list.ifEmpty { WbpSampleData.preloadedQuestions }
+        val list = pickNonRepeatingQuestions(subjectFilter = subjectFilter, targetCount = 25)
+        _questions.value = list
         resetOmrSession(durationSeconds = max(300, _questions.value.size * 42))
         _isExamPaused.value = false
         _isLiveExamActive.value = true
@@ -405,21 +648,25 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
             _isGeneratingAiMock.value = false
             result.fold(
                 onSuccess = { (aiQuestions, rawJson) ->
+                    repository.bulkAddUniqueQuestionsToVault(aiQuestions)
+                    val nonRepeating = aiQuestions.filter { it.id !in _seenQuestionIds.value }
+                        .ifEmpty { pickNonRepeatingQuestions(null, targetCount = 15) }
+                    markQuestionsAsSeen(nonRepeating)
                     _activeTestId.value = "AI_FULL_MOCK"
-                    _activeTestTitleEn.value = "AI Generated WBPRB Mock Test (${aiQuestions.size}Q)"
-                    _activeTestTitleBn.value = "AI জেনারেটেড WBPRB মক টেস্ট (${aiQuestions.size}টি প্রশ্ন)"
-                    _questions.value = aiQuestions
+                    _activeTestTitleEn.value = "AI Generated WBPRB Mock Test (${nonRepeating.size}Q)"
+                    _activeTestTitleBn.value = "AI জেনারেটেড WBPRB মক টেস্ট (${nonRepeating.size}টি প্রশ্ন)"
+                    _questions.value = nonRepeating
                     _lastGeneratedJson.value = rawJson
-                    resetOmrSession(durationSeconds = max(300, aiQuestions.size * 42))
+                    resetOmrSession(durationSeconds = max(300, nonRepeating.size * 42))
                     _isExamPaused.value = false
                     _isLiveExamActive.value = true
                     _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-                        "✅ নতুন WBPRB মক টেস্ট (${aiQuestions.size}টি প্রশ্ন) লোড হয়েছে!"
+                        "✅ নতুন WBPRB মক টেস্ট (${nonRepeating.size}টি আনসিন প্রশ্ন) লোড হয়েছে!"
                     else
-                        "✅ Loaded ${aiQuestions.size} fresh WBPRB Mock Test questions!"
+                        "✅ Loaded ${nonRepeating.size} fresh unseen WBPRB Mock Test questions!"
                 },
                 onFailure = { err ->
-                    _questions.value = WbpSampleData.preloadedQuestions.shuffled()
+                    _questions.value = pickNonRepeatingQuestions(null, targetCount = 15)
                     resetOmrSession(durationSeconds = 600)
                     _mockStatusBanner.value = err.message
                 }
@@ -463,21 +710,25 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
             _isGeneratingAiMock.value = false
             result.fold(
                 onSuccess = { (aiQuestions, rawJson) ->
+                    repository.bulkAddUniqueQuestionsToVault(aiQuestions)
+                    val nonRepeating = aiQuestions.filter { it.id !in _seenQuestionIds.value }
+                        .ifEmpty { pickNonRepeatingQuestions(subject, targetCount = 15) }
+                    markQuestionsAsSeen(nonRepeating)
                     _activeTestId.value = "AI_SEC_${subject.uppercase()}"
                     _activeTestTitleEn.value = "AI $subjectTitleEn Sectional Test"
                     _activeTestTitleBn.value = "AI $subjectTitleBn সেকশনাল টেস্ট"
-                    _questions.value = aiQuestions
+                    _questions.value = nonRepeating
                     _lastGeneratedJson.value = rawJson
-                    resetOmrSession(durationSeconds = max(300, aiQuestions.size * 42))
+                    resetOmrSession(durationSeconds = max(300, nonRepeating.size * 42))
                     _isExamPaused.value = false
                     _isLiveExamActive.value = true
                     _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-                        "✅ নতুন '$subjectTitleBn' সেকশনাল টেস্ট (${aiQuestions.size}টি প্রশ্ন) প্রস্তুত!"
+                        "✅ নতুন '$subjectTitleBn' সেকশনাল টেস্ট (${nonRepeating.size}টি আনসিন প্রশ্ন) প্রস্তুত!"
                     else
-                        "✅ Fresh '$subjectTitleEn' Sectional Test (${aiQuestions.size}Q) ready!"
+                        "✅ Fresh '$subjectTitleEn' Sectional Test (${nonRepeating.size} Unseen Q) ready!"
                 },
                 onFailure = {
-                    val fallback = WbpSampleData.buildQuestionsForTest(subject, 10)
+                    val fallback = pickNonRepeatingQuestions(subject, targetCount = 15)
                     _activeTestId.value = "AI_SEC_${subject.uppercase()}"
                     _activeTestTitleEn.value = "AI $subjectTitleEn Sectional Test"
                     _activeTestTitleBn.value = "AI $subjectTitleBn সেকশনাল টেস্ট"

@@ -67,6 +67,7 @@ import com.example.data.MistakeNotebookEntity
 import com.example.data.MockTestResultEntity
 import com.example.data.SubjectCategory
 import com.example.data.SyllabusTopicEntity
+import com.example.data.QuizQuestion
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CrimsonWrong
 import com.example.ui.theme.EmeraldSuccess
@@ -83,11 +84,15 @@ fun DashboardScreen(
     syllabusTopics: List<SyllabusTopicEntity>,
     mockResults: List<MockTestResultEntity>,
     mistakeNotebook: List<MistakeNotebookEntity>,
+    questionVault: List<QuizQuestion> = emptyList(),
+    seenQuestionIds: Set<String> = emptySet(),
+    bulkGeneratingTarget: String? = null,
     onSelectExam: (ExamType) -> Unit,
     onStartQuickQuiz: () -> Unit,
     onStartRetryMistakes: () -> Unit,
     onRemoveMistake: (String) -> Unit,
     onStartSubjectPractice: (String) -> Unit,
+    onBulkAdd50Questions: (String) -> Unit = {},
     onOpenSyllabus: () -> Unit,
     onOpenFlashcards: () -> Unit = onOpenSyllabus,
     onOpenMockInterview: () -> Unit = {},
@@ -429,6 +434,14 @@ fun DashboardScreen(
                         val progress = completedCount.toFloat() / totalCount.toFloat()
                         val progressPct = (progress * 100).roundToInt()
 
+                        val subjectVaultItems = remember(questionVault, subject.id) {
+                            questionVault.filter { it.subject.equals(subject.id, ignoreCase = true) }
+                        }
+                        val subjectSavedCount = subjectVaultItems.size
+                        val subjectUnseenCount = remember(subjectVaultItems, seenQuestionIds) {
+                            subjectVaultItems.count { it.id !in seenQuestionIds }
+                        }
+
                         val marksText = if (selectedExam == ExamType.CONSTABLE || subject == SubjectCategory.ENGLISH) {
                             "${subject.constableMarks}M"
                         } else {
@@ -438,11 +451,12 @@ fun DashboardScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
                                 .clickable { onStartSubjectPractice(subject.id) }
-                                .padding(vertical = 4.dp)
+                                .padding(10.dp)
                                 .testTag("subject_card_${subject.id.lowercase()}"),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -492,6 +506,22 @@ fun DashboardScreen(
                                     .clip(CircleShape),
                                 color = if (progressPct >= 70) EmeraldSuccess else MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+
+                            // Live Question Vault counter badge: [Saved in Vault: X / 1000 Questions • Unseen: Y]
+                            VaultCounterBadge(
+                                savedCount = subjectSavedCount,
+                                unseenCount = subjectUnseenCount,
+                                targetCapacity = 1000,
+                                modifier = Modifier.testTag("home_vault_badge_${subject.id.lowercase()}")
+                            )
+
+                            // ⚡ Bulk Add +50 New PYQ-Pattern Questions to Vault button
+                            BulkAdd50VaultButton(
+                                isBn = isBn,
+                                isLoading = bulkGeneratingTarget == subject.id,
+                                testTag = "home_bulk_add_50_${subject.id.lowercase()}",
+                                onClick = { onBulkAdd50Questions(subject.id) }
                             )
                         }
                     }
