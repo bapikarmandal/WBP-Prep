@@ -1,0 +1,6 @@
+{
+  "name": "WBP Prep",
+  "description": "Comprehensive WBP & KP Constable and SI exam preparation app with bilingual (Bengali/English) Live OMR Mock Tests, AI Doubt Solver, PMT/PET Physical Tracker, and WBPRB Syllabus checklist.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

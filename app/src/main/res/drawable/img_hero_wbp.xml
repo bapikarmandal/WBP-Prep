@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="400dp"
+    android:height="180dp"
+    android:viewportWidth="400"
+    android:viewportHeight="180">
+    <!-- Deep Police Navy Background Gradient -->
+    <path android:pathData="M0,0h400v180h-400z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="400"
+                android:endY="180"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#0B132B" />
+                <item android:offset="0.55" android:color="#1E3A8A" />
+                <item android:offset="1.0" android:color="#172554" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Subtle Sunrise Glow Over Kolkata Skyline -->
+    <path
+        android:fillColor="#22F59E0B"
+        android:pathData="M310,180 m-110,0 a110,110 0 1,0 220,0 a110,110 0 1,0 -220,0" />
+    <path
+        android:fillColor="#33FBBF24"
+        android:pathData="M310,180 m-70,0 a70,70 0 1,0 140,0 a70,70 0 1,0 -140,0" />
+    <!-- Howrah Bridge Silhouette -->
+    <path
+        android:fillColor="#3394A3B8"
+        android:pathData="M10,165 L390,165 L390,170 L10,170 Z M60,165 L75,115 L90,165 Z M210,165 L225,115 L240,165 Z M75,115 Q150,150 225,115 L225,120 Q150,155 75,120 Z" />
+    <!-- Khaki Gold Shield Emblem on Right -->
+    <path
+        android:fillColor="#D97706"
+        android:pathData="M325,34 L365,49 L365,86 C365,116 348,136 325,146 C302,136 285,116 285,86 L285,49 Z" />
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M325,42 L358,54 L358,86 C358,110 344,127 325,136 C306,127 292,110 292,86 L292,54 Z" />
+    <!-- Gold Star inside Shield -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M325,58 L331,73 L347,75 L335,85 L338,101 L325,92 L312,101 L315,85 L303,75 L319,73 Z" />
+    <!-- Decorative Tactical Grid Lines -->
+    <path
+        android:strokeColor="#22FBBF24"
+        android:strokeWidth="1"
+        android:pathData="M0,45 L260,45 M0,90 L240,90 M0,135 L260,135" />
+</vector>

@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">WBP Prep</string>
+    <string name="header_subtitle">WBPRB Constable &amp; SI Mission</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_mock_test">Mock Test</string>
+    <string name="nav_ai_tutor">AI Tutor</string>
+    <string name="nav_pet_tracker">PET Tracker</string>
+    <string name="nav_syllabus">Syllabus</string>
+    <string name="quick_daily_quiz">Quick 10-Minute Daily Quiz</string>
+    <string name="generate_ai_mock">Generate New AI Mock Test</string>
+    <string name="submit_test">Submit OMR Sheet</string>
+    <string name="security_warning_prototype">Prototype Notice: API keys in BuildConfig are for prototype testing only. Do not share this APK publicly.</string>
+</resources>
