@@ -346,6 +346,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         onSubmitTest = { wbpViewModel.submitMockTest() },
                         onGenerateAiMock = { wbpViewModel.generateNewAiMockTest() },
                         onRestartFullMock = { wbpViewModel.startFullPracticeSet(null) },
+                        onStartWeakChapterDrill = { wbpViewModel.startWeakChapterRecoveryDrill() },
                         onAskAiWeakTopic = { prompt ->
                             openAiTutorInInterviewMode = false
                             wbpViewModel.sendTutorQuestion(prompt)
@@ -386,7 +387,16 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         onToggleTopic = { wbpViewModel.toggleSyllabusItem(it) },
                         persistedRevisedIds = revisedPocketCardIds,
                         onToggleCardRevised = { wbpViewModel.togglePocketCardRevised(it) },
-                        initialFlashcardsMode = openSyllabusInFlashcardsMode
+                        initialFlashcardsMode = openSyllabusInFlashcardsMode,
+                        questionVault = questionVault,
+                        seenQuestionIds = seenQuestionIds,
+                        bulkGeneratingTarget = bulkGeneratingTarget,
+                        onStartChapterTest = { chapter ->
+                            wbpViewModel.startChapterPracticeTest(chapter)
+                        },
+                        onBulkAdd50ForChapter = { chapter ->
+                            wbpViewModel.bulkAdd50QuestionsToVault(chapter.subject, chapter.chapterId, chapter.titleEn)
+                        }
                     )
                 }
             }

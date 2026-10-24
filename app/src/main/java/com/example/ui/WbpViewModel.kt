@@ -91,16 +91,21 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialSeedVault)
 
-    // Non-Repeating Question Bank Engine: seenQuestionIds persisted in SharedPreferences
+    // Non-Repeating Question Bank Engine: seenQuestionIds & attemptedQuestionHashes persisted in SharedPreferences
     private val _seenQuestionIds = MutableStateFlow<Set<String>>(
         prefs.getStringSet("seen_question_ids", emptySet())?.toSet() ?: emptySet()
     )
     val seenQuestionIds: StateFlow<Set<String>> = _seenQuestionIds.asStateFlow()
 
+    private val _attemptedQuestionHashes = MutableStateFlow<Set<String>>(
+        prefs.getStringSet("attempted_question_hashes", emptySet())?.toSet() ?: emptySet()
+    )
+    val attemptedQuestionHashes: StateFlow<Set<String>> = _attemptedQuestionHashes.asStateFlow()
+
     private val _bulkGeneratingTarget = MutableStateFlow<String?>(null)
     val bulkGeneratingTarget: StateFlow<String?> = _bulkGeneratingTarget.asStateFlow()
 
-    private val _isImportingPyqBook = MutableStateFlow(false)
+    private val _isImportingPyqBook = MutableStateFlow<Boolean>(false)
     val isImportingPyqBook: StateFlow<Boolean> = _isImportingPyqBook.asStateFlow()
 
     // Live OMR Mock Test & Testbook Exam Hub State
@@ -199,91 +204,159 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun rememberInitialSeedVault(): List<QuizQuestion> {
         return (com.example.data.SopanPyqVaultSeed.buildInitialVaultQuestions() + WbpSampleData.preloadedQuestions)
-            .distinctBy { it.displayQuestionText().trim().lowercase() }
+            .distinctBy { com.example.data.TestbookQuestionEngine.normalizeQuestionText(it) }
     }
 
     private fun markQuestionsAsSeen(questionsToMark: List<QuizQuestion>) {
         if (questionsToMark.isEmpty()) return
-        val updated = _seenQuestionIds.value + questionsToMark.map { it.id }
-        _seenQuestionIds.value = updated
-        prefs.edit().putStringSet("seen_question_ids", updated).apply()
+        val updatedIds = _seenQuestionIds.value + questionsToMark.map { it.id }
+        val updatedHashes = _attemptedQuestionHashes.value +
+            questionsToMark.map { com.example.data.TestbookQuestionEngine.normalizeQuestionText(it) } +
+            questionsToMark.map { it.id }
+        _seenQuestionIds.value = updatedIds
+        _attemptedQuestionHashes.value = updatedHashes
+        prefs.edit()
+            .putStringSet("seen_question_ids", updatedIds)
+            .putStringSet("attempted_question_hashes", updatedHashes)
+            .apply()
     }
 
     fun resetSeenQuestionsHistory() {
         _seenQuestionIds.value = emptySet()
-        prefs.edit().remove("seen_question_ids").apply()
+        _attemptedQuestionHashes.value = emptySet()
+        prefs.edit()
+            .remove("seen_question_ids")
+            .remove("attempted_question_hashes")
+            .apply()
         _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
-            "🔄 দেখা প্রশ্নের তালিকা (Seen History) রিসেট করা হয়েছে—সব ভল্ট প্রশ্ন আবার নতুন হিসেবে পাওয়া যাবে!"
+            "🔄 দেখা প্রশ্নের তালিকা (Seen History & Hashes) রিসেট করা হয়েছে—সব ভল্ট প্রশ্ন আবার নতুন হিসেবে পাওয়া যাবে!"
         else
-            "🔄 Seen question history reset — all Vault questions are now marked Unseen!"
+            "🔄 Seen question history & hashes reset — all Vault questions are now marked Unseen!"
     }
 
     /**
-     * Non-Repeating Question Bank Engine:
-     * Strictly filters out any question ID already inside `seenQuestionIds` so questions NEVER repeat across tests.
-     * If unseen questions in the vault for the target filter are fewer than `targetCount`, automatically generates
-     * and persists fresh non-repeating PYQ-pattern questions into the vault on the fly.
+     * Strict Zero-Duplicate Question Paper Builder (`buildUniqueTestPaper(subject, count, examType)`):
+     * - Normalizes every question's text (`question_bn.trim().replace(/\s+/g, ' ')`) and uses a Set()
+     *   to guarantee 100% that no two questions in the same test paper ever share the same ID or text.
+     * - Uses an unbiased Fisher-Yates Shuffle Algorithm.
+     * - Prioritizes unseen questions using `attemptedQuestionHashes`.
+     * - Automatically generates any remaining needed unique questions via the Two-Layer Algorithmic + AI Engine.
      */
+    fun buildUniqueTestPaper(
+        subject: String?,
+        count: Int,
+        examType: String = _selectedExam.value.id,
+        chapterId: String? = null,
+        examFamily: String? = null
+    ): List<QuizQuestion> {
+        val fullVault = questionVault.value.ifEmpty { initialSeedVault }
+        val currentHashes = _attemptedQuestionHashes.value + _seenQuestionIds.value
+
+        val (uniquePaper, newlyGenerated) = com.example.data.TestbookQuestionEngine.buildUniqueTestPaper(
+            subject = subject,
+            count = count,
+            examType = examType,
+            chapterId = chapterId,
+            examFamily = examFamily,
+            existingVault = fullVault,
+            attemptedHashes = currentHashes
+        )
+
+        if (newlyGenerated.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.bulkAddUniqueQuestionsToVault(newlyGenerated)
+            }
+        }
+
+        // Background Layer B Gemini API batch prefetch when unseen GK/English questions run low
+        val targetSub = subject ?: "GK"
+        val unseenForSub = fullVault.count {
+            it.subject.equals(targetSub, ignoreCase = true) &&
+                it.id !in _seenQuestionIds.value &&
+                com.example.data.TestbookQuestionEngine.normalizeQuestionText(it) !in _attemptedQuestionHashes.value
+        }
+        if (unseenForSub < 35 && _bulkGeneratingTarget.value == null) {
+            viewModelScope.launch {
+                val aiBatch = GeminiClient.generateBulkVaultQuestions(
+                    subject = targetSub,
+                    chapterId = chapterId,
+                    chapterTitle = null,
+                    startSeedIndex = fullVault.size + 1,
+                    targetCount = 25
+                )
+                repository.bulkAddUniqueQuestionsToVault(aiBatch)
+            }
+        }
+
+        markQuestionsAsSeen(uniquePaper)
+        return uniquePaper
+    }
+
     private fun pickNonRepeatingQuestions(
         subjectFilter: String? = null,
         chapterId: String? = null,
         examFamily: String? = null,
         targetCount: Int = 25
     ): List<QuizQuestion> {
-        val currentSeen = _seenQuestionIds.value
-        val fullVault = questionVault.value.ifEmpty { initialSeedVault }
+        return buildUniqueTestPaper(
+            subject = subjectFilter,
+            count = targetCount,
+            examType = _selectedExam.value.id,
+            chapterId = chapterId,
+            examFamily = examFamily
+        )
+    }
 
-        val matchingPool = fullVault.filter { q ->
-            val subOk = subjectFilter == null || q.subject.equals(subjectFilter, ignoreCase = true)
-            val chapOk = chapterId == null || q.chapterId.equals(chapterId, ignoreCase = true)
-            val examOk = examFamily == null || examFamily == "ALL_EXAMS" || q.examFamily.equals(examFamily, ignoreCase = true)
-            subOk && chapOk && examOk
-        }
+    /**
+     * One-Tap Weak Chapter Recovery ("⚡ Fix My Weak Chapters (15-Q Custom Drill)"):
+     * Builds a targeted 15-question non-repeating mini-test from the exact chapters where the user
+     * made mistakes or took > 42s or skipped questions.
+     */
+    fun startWeakChapterRecoveryDrill() {
+        val currentQs = _questions.value
+        val currentAns = _selectedAnswers.value
+        val timeMap = _questionTimeSpent.value
 
-        val unseenPool = matchingPool.filter { it.id !in currentSeen }
-        val selected = mutableListOf<QuizQuestion>()
-
-        if (subjectFilter == null && chapterId == null && examFamily == null && targetCount >= 30) {
-            // Balanced Full Mock across all 4 subjects from unseen pool
-            val gkUnseen = unseenPool.filter { it.subject == "GK" }.shuffled()
-            val mathUnseen = unseenPool.filter { it.subject == "MATH" }.shuffled()
-            val reasUnseen = unseenPool.filter { it.subject == "REASONING" }.shuffled()
-            val engUnseen = unseenPool.filter { it.subject == "ENGLISH" }.shuffled()
-
-            val gkTarget = (targetCount * 25) / 85
-            val mathTarget = (targetCount * 25) / 85
-            val reasTarget = (targetCount * 25) / 85
-            val engTarget = max(1, targetCount - (gkTarget + mathTarget + reasTarget))
-
-            selected.addAll(gkUnseen.take(gkTarget))
-            selected.addAll(mathUnseen.take(mathTarget))
-            selected.addAll(reasUnseen.take(reasTarget))
-            selected.addAll(engUnseen.take(engTarget))
-        } else {
-            selected.addAll(unseenPool.shuffled().take(targetCount))
-        }
-
-        // If unseen pool had fewer than targetCount, generate brand-new non-repeating questions on the fly and save to vault
-        if (selected.size < targetCount) {
-            val needed = targetCount - selected.size
-            val targetSub = subjectFilter ?: "GK"
-            val offsetSeed = fullVault.size + currentSeen.size + 101
-            val freshGenerated = com.example.data.SopanPyqVaultSeed.generateProgrammaticBatch(
-                subject = targetSub,
-                chapterId = chapterId,
-                startOffset = offsetSeed,
-                count = needed + 15
-            ).filter { it.id !in currentSeen && selected.none { s -> s.id == it.id } }
-
-            val toUse = freshGenerated.take(needed)
-            selected.addAll(toUse)
-            viewModelScope.launch {
-                repository.bulkAddUniqueQuestionsToVault(freshGenerated)
+        val weakChapterPairs = mutableListOf<Pair<String, String>>()
+        currentQs.forEach { q ->
+            val userChoice = currentAns[q.id]
+            val qSec = timeMap[q.id] ?: 0
+            val isWrong = userChoice != null && userChoice != q.correctIndex
+            val isSlow = userChoice == q.correctIndex && qSec > 42
+            val isSkipped = userChoice == null
+            if ((isWrong || isSlow || isSkipped) && q.chapterId.isNotBlank()) {
+                weakChapterPairs.add(q.subject to q.chapterId)
             }
         }
 
-        markQuestionsAsSeen(selected)
-        return selected
+        val fullVault = questionVault.value.ifEmpty { initialSeedVault }
+        val (drillPaper, freshItems) = com.example.data.TestbookQuestionEngine.buildWeakChapterDrill(
+            weakChapters = weakChapterPairs,
+            targetCount = 15,
+            existingVault = fullVault,
+            attemptedHashes = _attemptedQuestionHashes.value + _seenQuestionIds.value
+        )
+
+        if (freshItems.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.bulkAddUniqueQuestionsToVault(freshItems)
+            }
+        }
+        markQuestionsAsSeen(drillPaper)
+
+        _isRetryMistakesMode.value = false
+        _activeTestId.value = "WEAK_CHAPTER_DRILL_15"
+        _activeTestTitleEn.value = "Weak Chapter Recovery Drill (15Q)"
+        _activeTestTitleBn.value = "দুর্বল অধ্যায় সংশোধনী ড্রিল (১৫টি প্রশ্ন)"
+        _questions.value = drillPaper
+        resetOmrSession(durationSeconds = 15 * 42)
+        _isExamPaused.value = false
+        _isLiveExamActive.value = true
+        _mockStatusBanner.value = if (_language.value == AppLanguage.BENGALI)
+            "⚡ দুর্বল অধ্যায় ড্রিল শুরু হয়েছে: আপনার ভুল ও ধীরগতির অধ্যায়গুলি থেকে ১৫টি নতুন প্রশ্ন!"
+        else
+            "⚡ Weak Chapter Drill Started: 15 fresh non-repeating questions targeting your weak chapters!"
+        _currentTab.value = BottomNavTab.MOCK_TEST
     }
 
     /**

@@ -28,9 +28,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Style
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,6 +46,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,14 +69,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppLanguage
+import com.example.data.ChapterStudyNotesRepository
 import com.example.data.PocketCardsRepository
 import com.example.data.PocketRevisionCard
+import com.example.data.QuizQuestion
 import com.example.data.RevisionDeckType
+import com.example.data.SopanChapterInfo
+import com.example.data.SopanPyqVaultSeed
+import com.example.data.StaticRevisionTable
 import com.example.data.SubjectCategory
 import com.example.data.SyllabusTopicEntity
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.EmeraldSuccess
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -79,12 +95,20 @@ fun SyllabusScreen(
     onToggleTopic: (SyllabusTopicEntity) -> Unit,
     persistedRevisedIds: Set<String> = emptySet(),
     onToggleCardRevised: ((String) -> Unit)? = null,
-    initialFlashcardsMode: Boolean = false
+    initialFlashcardsMode: Boolean = false,
+    questionVault: List<QuizQuestion> = emptyList(),
+    seenQuestionIds: Set<String> = emptySet(),
+    bulkGeneratingTarget: String? = null,
+    onStartChapterTest: (SopanChapterInfo) -> Unit = {},
+    onBulkAdd50ForChapter: (SopanChapterInfo) -> Unit = {}
 ) {
     val isBn = language == AppLanguage.BENGALI
     var isFlashcardsTab by remember { mutableStateOf(initialFlashcardsMode) }
     var selectedSubjectFilter by remember { mutableStateOf<String?>(null) }
     var selectedDeck by remember { mutableStateOf(RevisionDeckType.WB_STATIC_GK) }
+    var selectedStudySubject by remember { mutableStateOf("MATH") }
+    var expandedChapterId by remember { mutableStateOf<String?>("MATH_CH_01") }
+    var expandedTableId by remember { mutableStateOf<String?>("WB_RIVERS_DAMS") }
 
     LaunchedEffect(initialFlashcardsMode) {
         isFlashcardsTab = initialFlashcardsMode
@@ -265,6 +289,38 @@ fun SyllabusScreen(
                             pagerState.animateScrollToPage(pagerState.currentPage + 1)
                         }
                     }
+                }
+            )
+        }
+
+        // REQUIREMENT 3: CHAPTER-WISE STUDY NOTES, SHORTCUT FORMULAS & CHEAT SHEETS (All 53 SOPAN Chapters)
+        item {
+            ChapterWiseStudyHubSection(
+                isBn = isBn,
+                selectedSubject = selectedStudySubject,
+                expandedChapterId = expandedChapterId,
+                questionVault = questionVault,
+                seenQuestionIds = seenQuestionIds,
+                bulkGeneratingTarget = bulkGeneratingTarget,
+                onSelectSubject = { sub ->
+                    selectedStudySubject = sub
+                    expandedChapterId = SopanPyqVaultSeed.getChaptersForSubject(sub).firstOrNull()?.chapterId
+                },
+                onToggleChapterExpand = { chId ->
+                    expandedChapterId = if (expandedChapterId == chId) null else chId
+                },
+                onStartChapterTest = onStartChapterTest,
+                onBulkAdd50ForChapter = onBulkAdd50ForChapter
+            )
+        }
+
+        // West Bengal Special Static GK Revision Tables & High-Frequency WBP English Cheat Sheets
+        item {
+            StaticGkAndEnglishCheatTablesSection(
+                isBn = isBn,
+                expandedTableId = expandedTableId,
+                onToggleTable = { id ->
+                    expandedTableId = if (expandedTableId == id) null else id
                 }
             )
         }
@@ -833,3 +889,569 @@ private fun PocketFlashcardItem(
         }
     }
 }
+
+/**
+ * Complete Chapter-Wise Study Hub across all 53 SOPAN Academy chapters with 3 sub-tabs inside every chapter:
+ * [1. Concept & Shortcut Notes (বাংলায়)], [2. Chapter PYQs (2005–2024)], and [3. Start Chapter Test].
+ */
+@Composable
+private fun ChapterWiseStudyHubSection(
+    isBn: Boolean,
+    selectedSubject: String,
+    expandedChapterId: String?,
+    questionVault: List<QuizQuestion>,
+    seenQuestionIds: Set<String>,
+    bulkGeneratingTarget: String?,
+    onSelectSubject: (String) -> Unit,
+    onToggleChapterExpand: (String) -> Unit,
+    onStartChapterTest: (SopanChapterInfo) -> Unit,
+    onBulkAdd50ForChapter: (SopanChapterInfo) -> Unit
+) {
+    val subjectTabs = listOf(
+        Triple("MATH", "Math Shortcuts (18 Ch)", "গণিত শর্টকাট (১৮ অধ্যায়)"),
+        Triple("GK", "WB & Static GK (7 Ch)", "জিকে নোটস (৭ অধ্যায়)"),
+        Triple("REASONING", "GI & Reasoning (20 Ch)", "রিজনিং ট্রিকস (২০ অধ্যায়)"),
+        Triple("ENGLISH", "WBP English (8 Ch)", "ইংরেজি নোটস (৮ অধ্যায়)")
+    )
+
+    val chapters = remember(selectedSubject) {
+        SopanPyqVaultSeed.getChaptersForSubject(selectedSubject)
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("chapter_study_hub_section"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MenuBook,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Column {
+                    Text(
+                        text = if (isBn)
+                            "অধ্যায়ভিত্তিক স্টাডি নোটস, শর্টকাট সূত্র ও PYQ হাব"
+                        else
+                            "CHAPTER-WISE STUDY NOTES, SHORTCUT FORMULAS & PYQ HUB",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isBn)
+                            "প্রতিটি অধ্যায়ে রয়েছে: [১. শর্টকাট নোটস] • [২. বিগত বছরের PYQ] • [৩. অধ্যায় টেস্ট]"
+                        else
+                            "Inside every chapter: [1. Concept & Shortcut Notes] • [2. Chapter PYQs] • [3. Start Chapter Test]",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Subject Selector Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                subjectTabs.forEach { (subCode, labelEn, labelBn) ->
+                    val isSelected = selectedSubject == subCode
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onSelectSubject(subCode) }
+                            .testTag("study_hub_subject_$subCode"),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text(
+                            text = if (isBn) labelBn else labelEn,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
+
+            // Chapters Accordion List
+            chapters.forEach { chapter ->
+                val isExpanded = expandedChapterId == chapter.chapterId
+                var activeSubTab by remember(chapter.chapterId) { mutableIntStateOf(0) }
+                val studyNote = remember(chapter.chapterId) {
+                    ChapterStudyNotesRepository.getStudyNoteForChapter(chapter)
+                }
+                val chapterPyqs = remember(questionVault, chapter.chapterId) {
+                    val exact = questionVault.filter { it.chapterId.equals(chapter.chapterId, ignoreCase = true) }
+                    if (exact.isNotEmpty()) exact else questionVault.filter { it.subject.equals(chapter.subject, ignoreCase = true) }.take(5)
+                }
+                val unseenInChapter = remember(chapterPyqs, seenQuestionIds) {
+                    chapterPyqs.count { it.id !in seenQuestionIds }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("study_chapter_card_${chapter.chapterId}"),
+                    color = if (isExpanded) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.dp,
+                                color = if (isExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline,
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleChapterExpand(chapter.chapterId) },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "${chapter.subject} ${chapter.numberCode}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (isBn) "${chapter.titleBn} (${chapter.titleEn})" else "${chapter.titleEn} (${chapter.titleBn})",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (isBn)
+                                            "শর্টকাট সূত্র • ${chapterPyqs.size}টি PYQ প্রশ্ন • লাইভ চ্যাপ্টার টেস্ট"
+                                        else
+                                            "Shortcut Notes • ${chapterPyqs.size} PYQs • Chapter Test",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isExpanded) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                // 3 Sub-Tabs inside every chapter:
+                                // [1. Concept & Shortcut Notes (বাংলায়)], [2. Chapter PYQs (2005–2024)], [3. Start Chapter Test]
+                                val subTabLabels = listOf(
+                                    "1. Concept & Shortcut Notes (বাংলায়)",
+                                    "2. Chapter PYQs (2005–2024)",
+                                    "3. Start Chapter Test"
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    subTabLabels.forEachIndexed { idx, tabTitle ->
+                                        val isTabSelected = activeSubTab == idx
+                                        Surface(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { activeSubTab = idx }
+                                                .testTag("chapter_subtab_${chapter.chapterId}_${idx + 1}"),
+                                            color = if (isTabSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = tabTitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isTabSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isTabSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier
+                                                    .border(
+                                                        1.dp,
+                                                        if (isTabSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                when (activeSubTab) {
+                                    0 -> {
+                                        // Sub-Tab 1: Concept & Shortcut Notes (বাংলায়)
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            studyNote.summaryBulletsBn.forEach { bullet ->
+                                                Text(
+                                                    text = "• $bullet",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+
+                                            studyNote.shortcutFormulas.forEach { formula ->
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+                                                            .padding(10.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "⚡ ${formula.titleBn}",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                        Text(
+                                                            text = formula.formulaOrRuleBn,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = EmeraldSuccess
+                                                        )
+                                                        Text(
+                                                            text = formula.solvedExampleBn,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Surface(
+                                                color = AmberWarning.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = "🎯 Exam Hall Tip: ${studyNote.examTipBn}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = AmberWarning,
+                                                    modifier = Modifier.padding(8.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    1 -> {
+                                        // Sub-Tab 2: Chapter PYQs (2005–2024)
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            chapterPyqs.take(5).forEachIndexed { qIdx, q ->
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+                                                            .padding(10.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = "PYQ #${qIdx + 1}",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                            Text(
+                                                                text = "[${q.examYearTag.ifBlank { "WBPRB PYQ" }}]",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = AmberWarning
+                                                            )
+                                                        }
+                                                        Text(
+                                                            text = q.displayQuestionText(),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        val opts = q.displayOptions()
+                                                        Text(
+                                                            text = "✓ উত্তর: ${opts.getOrElse(q.correctIndex) { "" }}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = EmeraldSuccess
+                                                        )
+                                                        Text(
+                                                            text = q.displayExplanationBn(),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    else -> {
+                                        // Sub-Tab 3: Start Chapter Test
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            VaultCounterBadge(
+                                                savedCount = chapterPyqs.size,
+                                                unseenCount = unseenInChapter,
+                                                targetCapacity = 1000
+                                            )
+
+                                            Button(
+                                                onClick = { onStartChapterTest(chapter) },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(42.dp)
+                                                    .testTag("syllabus_start_chapter_test_${chapter.chapterId}"),
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primary,
+                                                    contentColor = Color.White
+                                                )
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = if (isBn)
+                                                        "Start Chapter Test (${chapter.titleBn} • ১৫টি প্রশ্ন)"
+                                                    else
+                                                        "Start Chapter Test (${chapter.titleEn} • 15Q)",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+
+                                            BulkAdd50VaultButton(
+                                                isBn = isBn,
+                                                isLoading = bulkGeneratingTarget == chapter.chapterId,
+                                                testTag = "syllabus_bulk_add_50_${chapter.chapterId}",
+                                                onClick = { onBulkAdd50ForChapter(chapter) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * West Bengal Special Static GK Revision Tables & High-Frequency WBP English Cheat Sheets in Bengali.
+ */
+@Composable
+private fun StaticGkAndEnglishCheatTablesSection(
+    isBn: Boolean,
+    expandedTableId: String?,
+    onToggleTable: (String) -> Unit
+) {
+    val tables: List<StaticRevisionTable> = ChapterStudyNotesRepository.wbStaticGkTables
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("static_gk_tables_section"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.TableChart,
+                    contentDescription = null,
+                    tint = EmeraldSuccess,
+                    modifier = Modifier.size(18.dp)
+                )
+                Column {
+                    Text(
+                        text = if (isBn)
+                            "পশ্চিমবঙ্গ স্পেশাল স্ট্যাটিক জিকে ও ইংরেজি চিট-শিট টেবিল"
+                        else
+                            "WB STATIC GK REVISION TABLES & ENGLISH CHEAT SHEETS",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isBn)
+                            "নদনদী ও বাঁধ, অভয়ারণ্য, লোকনৃত্য, ঐতিহাসিক যুদ্ধ, সংবিধানের ধারা ও Fixed Prepositions"
+                        else
+                            "Rivers & Dams, National Parks, Folk Dances, Battles, Articles & Fixed Prepositions",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            tables.forEach { table ->
+                val isExpanded = expandedTableId == table.id
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("revision_table_${table.id}"),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleTable(table.id) },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isBn) table.titleBn else table.titleEn,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isExpanded) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Table Header Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer)
+                                        .padding(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = table.headersBn.first,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(0.32f)
+                                    )
+                                    Text(
+                                        text = table.headersBn.second,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(0.32f)
+                                    )
+                                    Text(
+                                        text = table.headersBn.third,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(0.36f)
+                                    )
+                                }
+
+                                table.rows.forEach { row ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = row.col1,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.weight(0.32f)
+                                        )
+                                        Text(
+                                            text = row.col2,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(0.32f)
+                                        )
+                                        Text(
+                                            text = row.col3,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.36f)
+                                        )
+                                    }
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

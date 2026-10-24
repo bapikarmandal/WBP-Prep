@@ -670,26 +670,12 @@ object WbpSampleData {
     )
 
     fun buildQuestionsForTest(subjectFilter: String?, targetCount: Int): List<QuizQuestion> {
-        val basePool = if (subjectFilter == null) {
-            preloadedQuestions
-        } else {
-            preloadedQuestions.filter { it.subject.equals(subjectFilter, ignoreCase = true) }
-                .ifEmpty { preloadedQuestions }
-        }
-        if (basePool.size >= targetCount) {
-            return basePool.take(targetCount)
-        }
-        val expanded = mutableListOf<QuizQuestion>()
-        var index = 1
-        while (expanded.size < targetCount) {
-            for (q in basePool) {
-                if (expanded.size >= targetCount) break
-                val copyId = if (index <= basePool.size) q.id else "${q.id}_SET_${index}"
-                expanded.add(q.copy(id = copyId))
-                index++
-            }
-        }
-        return expanded
+        return TestbookQuestionEngine.buildUniqueTestPaper(
+            subject = subjectFilter,
+            count = targetCount,
+            examType = "WBP_CONSTABLE",
+            existingVault = preloadedQuestions
+        ).first
     }
 }
 

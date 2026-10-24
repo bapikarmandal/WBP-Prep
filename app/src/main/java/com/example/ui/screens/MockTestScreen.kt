@@ -151,6 +151,7 @@ fun MockTestScreen(
     onSubmitTest: () -> Unit,
     onGenerateAiMock: () -> Unit,
     onRestartFullMock: () -> Unit,
+    onStartWeakChapterDrill: () -> Unit = {},
     onAskAiWeakTopic: (String) -> Unit = {}
 ) {
     if (isLiveExamActive) {
@@ -182,6 +183,7 @@ fun MockTestScreen(
             onRetryMistakes = onRetryMistakes,
             onSubmitTest = onSubmitTest,
             onRestartFullMock = onRestartFullMock,
+            onStartWeakChapterDrill = onStartWeakChapterDrill,
             onAskAiWeakTopic = onAskAiWeakTopic
         )
     } else {
@@ -910,6 +912,7 @@ private fun TestbookLiveExamView(
     onRetryMistakes: () -> Unit,
     onSubmitTest: () -> Unit,
     onRestartFullMock: () -> Unit,
+    onStartWeakChapterDrill: () -> Unit = {},
     onAskAiWeakTopic: (String) -> Unit
 ) {
     val isBn = language == AppLanguage.BENGALI
@@ -1109,6 +1112,51 @@ private fun TestbookLiveExamView(
                                         contentDescription = "Open Question Palette",
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Horizontal Testbook Subject Section Switcher Bar: [GK (25)], [Math (25)], [Reasoning (25)], [English (10)]
+                    val sectionTabs = remember(questions) {
+                        val order = listOf(
+                            "GK" to "GK",
+                            "MATH" to "Math",
+                            "REASONING" to "Reasoning",
+                            "ENGLISH" to "English"
+                        )
+                        order.mapNotNull { (code, label) ->
+                            val firstIdx = questions.indexOfFirst { it.subject.equals(code, ignoreCase = true) }
+                            val count = questions.count { it.subject.equals(code, ignoreCase = true) }
+                            if (firstIdx >= 0 && count > 0) Triple(code, "$label ($count)", firstIdx) else null
+                        }
+                    }
+
+                    if (!isSubmitted && sectionTabs.size > 1) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .testTag("live_exam_section_tabs"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(sectionTabs, key = { it.first }) { (subCode, tabLabel, firstQuestionIdx) ->
+                                val isCurrentSection = currentQuestion.subject.equals(subCode, ignoreCase = true)
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onSelectQuestion(firstQuestionIdx) }
+                                        .testTag("section_tab_${subCode.lowercase()}"),
+                                    color = if (isCurrentSection) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = tabLabel,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isCurrentSection) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isCurrentSection) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                                     )
                                 }
                             }
@@ -1444,20 +1492,19 @@ private fun TestbookLiveExamView(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            if (currentQuestion.examYearTag.isNotBlank()) {
-                                Surface(
-                                    color = AmberWarning.copy(alpha = 0.14f),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                ) {
-                                    Text(
-                                        text = "[${currentQuestion.examYearTag}]",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AmberWarning,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
+                            val effectiveYearTag = currentQuestion.examYearTag.ifBlank { "WBPRB Expected Pattern" }
+                            Surface(
+                                color = AmberWarning.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            ) {
+                                Text(
+                                    text = "[$effectiveYearTag]",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberWarning,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
                             }
 
                             // Question Text — ALWAYS in Bengali for GK, Math, Reasoning; English for English Grammar
@@ -1571,6 +1618,7 @@ private fun TestbookLiveExamView(
                         onRetake = onRestartFullMock,
                         onBackToHub = onExitLiveExamToHub,
                         onRetryMistakes = onRetryMistakes,
+                        onStartWeakChapterDrill = onStartWeakChapterDrill,
                         hasMistakes = mistakeNotebook.isNotEmpty(),
                         onAskAiWeakTopic = onAskAiWeakTopic
                     )
@@ -2132,6 +2180,17 @@ private data class SubjectStat(
     val avgSeconds: Int
 )
 
+private enum class WbpReservationCategory(
+    val label: String,
+    val safeCutoffOutOf85: Double
+) {
+    UR("UR / General", 54.5),
+    OBC_B("OBC-B", 51.0),
+    OBC_A("OBC-A", 46.5),
+    SC("SC", 47.0),
+    ST("ST", 41.5)
+}
+
 @Composable
 private fun ScorecardSummaryCard(
     isBn: Boolean,
@@ -2142,21 +2201,43 @@ private fun ScorecardSummaryCard(
     onRetake: () -> Unit,
     onBackToHub: () -> Unit,
     onRetryMistakes: () -> Unit,
+    onStartWeakChapterDrill: () -> Unit = {},
     hasMistakes: Boolean,
     onAskAiWeakTopic: (String) -> Unit
 ) {
+    var selectedCategory by remember { mutableStateOf(WbpReservationCategory.UR) }
+
     var correct = 0
     var wrong = 0
+    var strongAndFastCount = 0
+    var correctButSlowCount = 0
+    var negativeTrapCount = 0
+    var unattemptedGapCount = 0
+
     questions.forEach { q ->
         val c = selectedAnswers[q.id]
+        val sec = questionTimeSpent[q.id] ?: 0
         if (c != null) {
-            if (c == q.correctIndex) correct++ else wrong++
+            if (c == q.correctIndex) {
+                correct++
+                if (sec <= 42) strongAndFastCount++ else correctButSlowCount++
+            } else {
+                wrong++
+                negativeTrapCount++
+            }
+        } else {
+            unattemptedGapCount++
         }
     }
     val skipped = questions.size - (correct + wrong)
     val netScore = (correct * 1.0) - (wrong * 0.25)
     val attempted = correct + wrong
     val accuracy = if (attempted > 0) ((correct.toDouble() / attempted) * 100).roundToInt() else 0
+
+    // Scale cutoff proportionally to the current test's total marks (85 for Full Mock, 25 for Sectional, etc.)
+    val maxMarks = questions.size.coerceAtLeast(1)
+    val scaledCutoff = (selectedCategory.safeCutoffOutOf85 * maxMarks) / 85.0
+    val isQualifiedForPet = netScore >= scaledCutoff
 
     val subjectStats = SubjectCategory.entries.mapNotNull { sub ->
         val subQs = questions.filter { it.subject.equals(sub.id, ignoreCase = true) }
@@ -2206,7 +2287,7 @@ private fun ScorecardSummaryCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (isBn) "WBPRB OMR স্কোরকার্ড" else "OMR SCORECARD & ANALYTICS",
+                text = if (isBn) "WBPRB OMR স্কোরকার্ড ও কাট-অফ প্রেডিক্টর" else "TESTBOOK SELECTION PREDICTOR & SCORECARD",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.SemiBold,
@@ -2217,7 +2298,7 @@ private fun ScorecardSummaryCard(
             Text(
                 text = String.format(Locale.US, "%.2f / %d", netScore, questions.size),
                 style = MaterialTheme.typography.headlineLarge,
-                color = EmeraldSuccess,
+                color = if (isQualifiedForPet) EmeraldSuccess else MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
             )
             Text(
@@ -2228,6 +2309,104 @@ private fun ScorecardSummaryCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 1. Category Cut-Off Comparison Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("cutoff_predictor_box"),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (isBn)
+                            "ক্যাটাগরি নির্বাচন করে কাট-অফ তুলনা করুন (Category Cut-Off):"
+                        else
+                            "Select Category for Safe Cut-Off Comparison:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(WbpReservationCategory.entries) { cat ->
+                            val isSel = selectedCategory == cat
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { selectedCategory = cat }
+                                    .testTag("cutoff_category_${cat.name}"),
+                                color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = cat.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = if (isBn)
+                                    "${selectedCategory.label} সেফ কাট-অফ: ${String.format(Locale.US, "%.2f", scaledCutoff)} / $maxMarks"
+                                else
+                                    "${selectedCategory.label} Safe Cut-Off: ${String.format(Locale.US, "%.2f", scaledCutoff)} / $maxMarks",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isBn)
+                                    "(৮৫ নম্বরে লক্ষ্যমাত্রা: ${selectedCategory.safeCutoffOutOf85})"
+                                else
+                                    "(Equivalent to ${selectedCategory.safeCutoffOutOf85} / 85 in Prelims)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Surface(
+                            color = if (isQualifiedForPet) EmeraldSuccess.copy(alpha = 0.15f) else CrimsonWrong.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = if (isQualifiedForPet)
+                                    "QUALIFIED FOR PMT/PET"
+                                else
+                                    "BELOW CUT-OFF — NEEDS REVISION",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isQualifiedForPet) EmeraldSuccess else CrimsonWrong,
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    .testTag("cutoff_status_badge")
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -2251,6 +2430,68 @@ private fun ScorecardSummaryCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 2. 4-Quadrant Speed & Accuracy Breakdown
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("four_quadrant_breakdown"),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (isBn)
+                        "৪-কোয়াড্রান্ট স্পিড ও নির্ভুলতা বিশ্লেষণ (4-Quadrant Analysis)"
+                    else
+                        "4-Quadrant Speed & Accuracy Breakdown",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuadrantAnalyticTile(
+                        title = if (isBn) "Strong & Fast (<42s)" else "Strong & Fast (<42s)",
+                        subtitle = if (isBn) "সঠিক ও দ্রুত" else "Correct in ≤ 42s",
+                        count = "$strongAndFastCount Q",
+                        accentColor = EmeraldSuccess,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuadrantAnalyticTile(
+                        title = if (isBn) "Correct but Slow (>42s)" else "Correct but Slow (>42s)",
+                        subtitle = if (isBn) "শর্টকাট ট্রিক প্রয়োজন" else "Needs shortcut practice",
+                        count = "$correctButSlowCount Q",
+                        accentColor = AmberWarning,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuadrantAnalyticTile(
+                        title = if (isBn) "Negative Traps (-0.25)" else "Negative Marking Traps",
+                        subtitle = if (isBn) "-${String.format(Locale.US, "%.2f", negativeTrapCount * 0.25)} নম্বর কাটা গেছে" else "Cost -${String.format(Locale.US, "%.2f", negativeTrapCount * 0.25)} marks",
+                        count = "$negativeTrapCount Q",
+                        accentColor = CrimsonWrong,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuadrantAnalyticTile(
+                        title = if (isBn) "Unattempted / Gaps" else "Unattempted / Gaps",
+                        subtitle = if (isBn) "কনসেপ্ট রিভিশন প্রয়োজন" else "Concept gaps to revise",
+                        count = "$unattemptedGapCount Q",
+                        accentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -2422,6 +2663,31 @@ private fun ScorecardSummaryCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
+            // 3. One-Tap Weak Chapter Recovery Button ("⚡ Fix My Weak Chapters (15-Q Custom Drill)")
+            Button(
+                onClick = onStartWeakChapterDrill,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("fix_weak_chapters_drill_button"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(10.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "⚡ Fix My Weak Chapters (15-Q Custom Drill)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             if (hasMistakes) {
                 Button(
                     onClick = onRetryMistakes,
@@ -2462,6 +2728,50 @@ private fun ScorecardSummaryCard(
                     Text(if (isBn) "আবার দিন" else "Re-attempt")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuadrantAnalyticTile(
+    title: String,
+    subtitle: String,
+    count: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = accentColor.copy(alpha = 0.09f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = count,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
