@@ -6,7 +6,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.AppLanguage
+import com.example.data.AspirantCasteCategory
+import com.example.data.AspirantProfile
+import com.example.data.AspirantTargetExam
 import com.example.data.ChatMessageEntity
+import com.example.data.CloudDbConfig
 import com.example.data.ExamType
 import com.example.data.MistakeNotebookEntity
 import com.example.data.MockTestResultEntity
@@ -14,10 +18,18 @@ import com.example.data.PetRunLogEntity
 import com.example.data.QuestionPaletteStatus
 import com.example.data.QuizQuestion
 import com.example.data.SyllabusTopicEntity
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import com.example.R
+import com.example.data.UserRole
+import com.example.data.WbpFirestoreRepository
 import com.example.data.WbpRepository
 import com.example.data.WbpSampleData
 import com.example.network.GeminiClient
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,26 +38,30 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 enum class BottomNavTab(val route: String, val labelEn: String, val labelBn: String) {
     HOME("home", "Home", "হোম"),
-    MOCK_TEST("mock_test", "Mock Test", "মক টেস্ট"),
-    AI_TUTOR("ai_tutor", "AI Tutor", "AI টিউটর"),
+    MOCK_TEST("mock_test", "Tests", "মক টেস্ট"),
+    SYLLABUS("syllabus", "Study & Notes", "সিলেবাস"),
+    AI_TUTOR("ai_tutor", "AI Tutor & PET", "AI টিউটর"),
     PET_TRACKER("pet_tracker", "PET Tracker", "মাঠ প্রস্তুতি"),
-    SYLLABUS("syllabus", "Syllabus", "সিলেবাস")
+    ADMIN_PANEL("admin_panel", "🛠️ Admin Studio", "🛠️ অ্যাডমিন")
 }
 
 class WbpViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("wbp_kp_prefs", Context.MODE_PRIVATE)
     private val repository = WbpRepository(AppDatabase.getInstance(application).wbpDao())
+    private val firestoreRepository = WbpFirestoreRepository(application)
+    private val jsonFormatter = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    // Persistent Preferences (UI standardized 100% to English; Dark Mode, Selected Exam, Daily Streak)
+    // Persistent Preferences (UI standardized 100% to English; Light Mode Default, Selected Exam, Daily Streak)
     private val _language = MutableStateFlow(AppLanguage.ENGLISH)
     val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
-    private val _isDarkMode = MutableStateFlow(prefs.getBoolean("dark_mode", true))
+    private val _isDarkMode = MutableStateFlow(prefs.getBoolean("dark_mode", false))
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
 
     private val _selectedExam = MutableStateFlow(
@@ -59,6 +75,29 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentTab = MutableStateFlow(BottomNavTab.HOME)
     val currentTab: StateFlow<BottomNavTab> = _currentTab.asStateFlow()
+
+    // Role-Based Authentication State (Aspirant vs. Admin)
+    private val _userRole = MutableStateFlow(loadSavedUserRole())
+    val userRole: StateFlow<UserRole> = _userRole.asStateFlow()
+
+    private val _currentAspirant = MutableStateFlow<AspirantProfile?>(loadSavedAspirantProfile())
+    val currentAspirant: StateFlow<AspirantProfile?> = _currentAspirant.asStateFlow()
+
+    private val _authErrorMessage = MutableStateFlow<String?>(null)
+    val authErrorMessage: StateFlow<String?> = _authErrorMessage.asStateFlow()
+
+    private val _adminPasskey = MutableStateFlow(prefs.getString("admin_secret_passkey", "admin123") ?: "admin123")
+    val adminPasskey: StateFlow<String> = _adminPasskey.asStateFlow()
+
+    private val _cloudDbConfig = MutableStateFlow(loadSavedCloudDbConfig())
+    val cloudDbConfig: StateFlow<CloudDbConfig> = _cloudDbConfig.asStateFlow()
+
+    private val _isSyncingCloud = MutableStateFlow(false)
+    val isSyncingCloud: StateFlow<Boolean> = _isSyncingCloud.asStateFlow()
+
+    val registeredAspirants: StateFlow<List<AspirantProfile>> = repository.registeredAspirants
+        .map { list -> list.map { it.toProfile() } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // Room Database Flows
     val syllabusTopics: StateFlow<List<SyllabusTopicEntity>> = repository.syllabusTopics
@@ -245,14 +284,381 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (_: Exception) {
             }
+            // Refresh current aspirant profile from Room DB if logged in as Aspirant
+            val activeAspirant = _currentAspirant.value
+            if (_userRole.value == UserRole.ASPIRANT && activeAspirant != null) {
+                val refreshed = repository.getAspirantByEmail(activeAspirant.email)
+                if (refreshed != null) {
+                    _currentAspirant.value = refreshed
+                    saveAspirantSession(refreshed)
+                }
+            }
         }
         startOrResetTimer(600)
         resetInterviewForDistrict(_selectedDistrict.value)
     }
 
+    private fun loadSavedUserRole(): UserRole {
+        val raw = prefs.getString("user_role", UserRole.UNAUTHENTICATED.name) ?: UserRole.UNAUTHENTICATED.name
+        return UserRole.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: UserRole.UNAUTHENTICATED
+    }
+
+    private fun loadSavedAspirantProfile(): AspirantProfile? {
+        val rawJson = prefs.getString("active_aspirant_json", null) ?: return null
+        return try {
+            jsonFormatter.decodeFromString(AspirantProfile.serializer(), rawJson)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun saveAspirantSession(profile: AspirantProfile) {
+        _currentAspirant.value = profile
+        _selectedExam.value = profile.resolvedTargetExam.examType
+        prefs.edit()
+            .putString("user_role", UserRole.ASPIRANT.name)
+            .putString("active_aspirant_json", jsonFormatter.encodeToString(AspirantProfile.serializer(), profile))
+            .putString("exam_type", profile.resolvedTargetExam.examType.id)
+            .apply()
+    }
+
+    private fun loadSavedCloudDbConfig(): CloudDbConfig {
+        val raw = prefs.getString("cloud_db_config_json", null)
+        if (raw != null) {
+            return try {
+                jsonFormatter.decodeFromString(CloudDbConfig.serializer(), raw)
+            } catch (_: Exception) {
+                defaultProvisionedCloudConfig()
+            }
+        }
+        return defaultProvisionedCloudConfig()
+    }
+
+    private fun defaultProvisionedCloudConfig(): CloudDbConfig {
+        val dbId = try {
+            getApplication<Application>().getString(R.string.firestore_database_id)
+        } catch (_: Exception) {
+            "ai-studio-android-wbpprep-b2f6d97f-0e96-4432-b61b-f703e99cdf11"
+        }
+        return CloudDbConfig(
+            isEnabled = true,
+            provider = "Firebase Firestore",
+            projectUrlOrId = "wbp-prep",
+            apiKeyOrToken = dbId,
+            lastSyncedTimestamp = System.currentTimeMillis()
+        )
+    }
+
+    fun clearAuthError() {
+        _authErrorMessage.value = null
+    }
+
+    fun signUpAspirant(
+        fullName: String,
+        email: String,
+        password: String,
+        casteCategory: AspirantCasteCategory,
+        targetExam: AspirantTargetExam
+    ) {
+        val cleanName = fullName.trim()
+        val cleanEmail = email.trim().lowercase()
+        val cleanPass = password.trim()
+
+        if (cleanName.length < 2) {
+            _authErrorMessage.value = "Please enter your Full Name (e.g., Rahul Mondal)."
+            return
+        }
+        if (!cleanEmail.contains("@") || !cleanEmail.contains(".")) {
+            _authErrorMessage.value = "Please enter a valid Gmail / Email address."
+            return
+        }
+        if (cleanPass.length < 4) {
+            _authErrorMessage.value = "Password must be at least 4 characters."
+            return
+        }
+
+        viewModelScope.launch {
+            val existing = repository.getAspirantByEmail(cleanEmail)
+            if (existing != null) {
+                _authErrorMessage.value = "An account with $cleanEmail already exists. Please switch to Login."
+                return@launch
+            }
+            val newProfile = AspirantProfile(
+                id = "ASP_${System.currentTimeMillis()}",
+                fullName = cleanName,
+                email = cleanEmail,
+                password = cleanPass,
+                casteCategory = casteCategory.name,
+                targetExam = targetExam.name,
+                testsAttempted = 0,
+                averageScore = 0.0,
+                joinTimestamp = System.currentTimeMillis()
+            )
+            repository.upsertAspirantProfile(newProfile)
+            _authErrorMessage.value = null
+            _userRole.value = UserRole.ASPIRANT
+            saveAspirantSession(newProfile)
+            _currentTab.value = BottomNavTab.HOME
+            syncLocalDatabaseBackupFile()
+        }
+    }
+
+    fun loginAspirant(email: String, password: String) {
+        val cleanEmail = email.trim().lowercase()
+        val cleanPass = password.trim()
+        if (cleanEmail.isBlank() || cleanPass.isBlank()) {
+            _authErrorMessage.value = "Please enter your registered Gmail and Password."
+            return
+        }
+        viewModelScope.launch {
+            val existing = repository.getAspirantByEmail(cleanEmail)
+            if (existing == null) {
+                _authErrorMessage.value = "No aspirant account found for '$cleanEmail'. Click 'New? Sign Up' or use Quick Demo Login."
+                return@launch
+            }
+            if (existing.password != cleanPass) {
+                _authErrorMessage.value = "Incorrect password for '$cleanEmail'. Please try again."
+                return@launch
+            }
+            _authErrorMessage.value = null
+            _userRole.value = UserRole.ASPIRANT
+            saveAspirantSession(existing)
+            _currentTab.value = BottomNavTab.HOME
+        }
+    }
+
+    fun quickDemoAspirantLogin() {
+        viewModelScope.launch {
+            val demoEmail = "rahul.mondal@gmail.com"
+            val existing = repository.getAspirantByEmail(demoEmail) ?: AspirantProfile(
+                id = "ASP_DEMO_RAHUL",
+                fullName = "Rahul Mondal",
+                email = demoEmail,
+                password = "rahul123",
+                casteCategory = AspirantCasteCategory.OBC_B.name,
+                targetExam = AspirantTargetExam.WBP_CONSTABLE.name,
+                testsAttempted = 4,
+                averageScore = 58.25,
+                joinTimestamp = System.currentTimeMillis() - 14L * 86_400_000L
+            ).also { repository.upsertAspirantProfile(it) }
+
+            _authErrorMessage.value = null
+            _userRole.value = UserRole.ASPIRANT
+            saveAspirantSession(existing)
+            _currentTab.value = BottomNavTab.HOME
+        }
+    }
+
+    fun signInWithGoogleIdToken(
+        idToken: String,
+        displayNameHint: String?,
+        emailHint: String?,
+        selectedCategory: AspirantCasteCategory = AspirantCasteCategory.GENERAL,
+        selectedTargetExam: AspirantTargetExam = AspirantTargetExam.WBP_CONSTABLE
+    ) {
+        viewModelScope.launch {
+            try {
+                val credential = GoogleAuthProvider.getCredential(idToken, null)
+                val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                val firebaseUser = authResult.user
+                val resolvedEmail = (firebaseUser?.email ?: emailHint ?: "aspirant@wbpprep.com").trim().lowercase()
+                val resolvedName = (firebaseUser?.displayName ?: displayNameHint ?: "WBP Aspirant").trim().ifBlank { "WBP Aspirant" }
+
+                val localExisting = repository.getAspirantByEmail(resolvedEmail)
+                val cloudProfile = firestoreRepository.getAspirantProfile().getOrNull()
+
+                val mergedProfile = localExisting ?: AspirantProfile(
+                    id = firebaseUser?.uid ?: "ASP_${System.currentTimeMillis()}",
+                    fullName = cloudProfile?.fullName?.takeIf { it.isNotBlank() } ?: resolvedName,
+                    email = resolvedEmail,
+                    password = "google_oauth_verified",
+                    casteCategory = cloudProfile?.casteCategory ?: selectedCategory.name,
+                    targetExam = cloudProfile?.targetExam ?: selectedTargetExam.name,
+                    testsAttempted = cloudProfile?.testsAttempted?.toInt() ?: 0,
+                    averageScore = if ((cloudProfile?.testsAttempted ?: 0L) > 0L) {
+                        (cloudProfile?.totalScoreAccumulated ?: 0.0) / cloudProfile!!.testsAttempted.toDouble()
+                    } else 0.0,
+                    joinTimestamp = System.currentTimeMillis()
+                )
+
+                repository.upsertAspirantProfile(mergedProfile)
+                firestoreRepository.upsertAspirantProfile(
+                    fullName = mergedProfile.fullName,
+                    email = mergedProfile.email,
+                    casteCategory = mergedProfile.casteCategory,
+                    targetExam = mergedProfile.targetExam,
+                    testsAttempted = mergedProfile.testsAttempted,
+                    totalScoreAccumulated = mergedProfile.averageScore * mergedProfile.testsAttempted
+                )
+
+                _authErrorMessage.value = null
+                _userRole.value = UserRole.ASPIRANT
+                saveAspirantSession(mergedProfile)
+                _currentTab.value = BottomNavTab.HOME
+                syncLocalDatabaseBackupFile()
+            } catch (e: Exception) {
+                _authErrorMessage.value = "Google Sign-In failed: ${e.localizedMessage ?: "Please try again"}"
+            }
+        }
+    }
+
+    fun loginAdmin(email: String, passkey: String) {
+        val cleanEmail = email.trim().lowercase()
+        val cleanPasskey = passkey.trim()
+        val expectedEmail = "admin@wbpprep.com"
+        val expectedPasskey = _adminPasskey.value
+
+        if (cleanEmail != expectedEmail || cleanPasskey != expectedPasskey) {
+            _authErrorMessage.value = "Invalid Admin credentials. Default Email: admin@wbpprep.com | Default Passkey: $expectedPasskey"
+            return
+        }
+        _authErrorMessage.value = null
+        _userRole.value = UserRole.ADMIN
+        prefs.edit().putString("user_role", UserRole.ADMIN.name).apply()
+        _currentTab.value = BottomNavTab.ADMIN_PANEL
+    }
+
+    /**
+     * 1-Tap Role Switcher in the Top Profile Menu for fast testing between Aspirant and Admin Portal
+     */
+    fun switchRoleOneTap() {
+        if (_userRole.value == UserRole.ADMIN) {
+            if (_currentAspirant.value != null) {
+                _userRole.value = UserRole.ASPIRANT
+                prefs.edit().putString("user_role", UserRole.ASPIRANT.name).apply()
+                _currentTab.value = BottomNavTab.HOME
+            } else {
+                quickDemoAspirantLogin()
+            }
+        } else {
+            _authErrorMessage.value = null
+            _userRole.value = UserRole.ADMIN
+            prefs.edit().putString("user_role", UserRole.ADMIN.name).apply()
+            _currentTab.value = BottomNavTab.ADMIN_PANEL
+        }
+    }
+
+    fun updateAdminPasskey(newPasskey: String) {
+        val clean = newPasskey.trim()
+        if (clean.length < 4) {
+            _scannerToastMessage.value = "⚠️ Admin passkey must be at least 4 characters."
+            return
+        }
+        _adminPasskey.value = clean
+        prefs.edit().putString("admin_secret_passkey", clean).apply()
+        _scannerToastMessage.value = "🔑 Admin Secret Passkey updated successfully!"
+    }
+
+    fun updateCurrentAspirantProfile(
+        fullName: String,
+        casteCategory: AspirantCasteCategory,
+        targetExam: AspirantTargetExam
+    ) {
+        val current = _currentAspirant.value ?: return
+        val updated = current.copy(
+            fullName = fullName.trim().ifBlank { current.fullName },
+            casteCategory = casteCategory.name,
+            targetExam = targetExam.name
+        )
+        viewModelScope.launch {
+            repository.upsertAspirantProfile(updated)
+            saveAspirantSession(updated)
+            syncLocalDatabaseBackupFile()
+            _mockStatusBanner.value = "✅ Profile Updated: ${updated.fullName} • ${casteCategory.shortBadge} • ${targetExam.shortBadge}"
+        }
+    }
+
+    fun deleteAspirantByEmail(email: String) {
+        viewModelScope.launch {
+            repository.deleteAspirantProfile(email)
+            syncLocalDatabaseBackupFile()
+            _scannerToastMessage.value = "🗑️ Removed aspirant '$email' from directory."
+        }
+    }
+
+    fun logoutUser() {
+        viewModelScope.launch {
+            try {
+                FirebaseAuth.getInstance().signOut()
+                CredentialManager.create(getApplication()).clearCredentialState(ClearCredentialStateRequest())
+            } catch (_: Exception) {
+            }
+        }
+        _userRole.value = UserRole.UNAUTHENTICATED
+        _currentAspirant.value = null
+        _authErrorMessage.value = null
+        if (_currentTab.value == BottomNavTab.ADMIN_PANEL) {
+            _currentTab.value = BottomNavTab.HOME
+        }
+        prefs.edit()
+            .putString("user_role", UserRole.UNAUTHENTICATED.name)
+            .remove("active_aspirant_json")
+            .apply()
+    }
+
+    fun saveCloudDbConfig(config: CloudDbConfig) {
+        _cloudDbConfig.value = config
+        prefs.edit()
+            .putString("cloud_db_config_json", jsonFormatter.encodeToString(CloudDbConfig.serializer(), config))
+            .apply()
+        if (config.isCloudConfigured) {
+            triggerCloudDatabaseSync()
+        } else {
+            _scannerToastMessage.value = "💾 Database set to Local SQLite + JSON Persistence."
+        }
+    }
+
+    fun triggerCloudDatabaseSync() {
+        if (_isSyncingCloud.value) return
+        _isSyncingCloud.value = true
+        viewModelScope.launch {
+            try {
+                syncLocalDatabaseBackupFile()
+                if (FirebaseAuth.getInstance().currentUser != null) {
+                    val activeAsp = _currentAspirant.value
+                    if (activeAsp != null) {
+                        firestoreRepository.upsertAspirantProfile(
+                            fullName = activeAsp.fullName,
+                            email = activeAsp.email,
+                            casteCategory = activeAsp.casteCategory,
+                            targetExam = activeAsp.targetExam,
+                            testsAttempted = activeAsp.testsAttempted,
+                            totalScoreAccumulated = activeAsp.averageScore * activeAsp.testsAttempted
+                        )
+                    }
+                    questionVault.value.filter { it.id.startsWith("MANUAL_") || it.id.startsWith("SCAN_") }
+                        .take(25)
+                        .forEach { q ->
+                            firestoreRepository.createQuestion(
+                                subject = q.subject,
+                                chapter = q.effectiveChapterName(),
+                                isPyq = q.isPyq,
+                                pyqExam = q.pyqExam.takeIf { it.isNotBlank() },
+                                pyqYear = q.pyqYear.takeIf { it.isNotBlank() },
+                                questionBn = q.displayQuestionText(),
+                                optionsBn = q.displayOptions(),
+                                correctIndex = q.correctIndex,
+                                explanationBn = q.displayExplanationBn(),
+                                customId = q.id.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(100)
+                            )
+                        }
+                }
+                delay(350L)
+                val updated = _cloudDbConfig.value.copy(lastSyncedTimestamp = System.currentTimeMillis())
+                _cloudDbConfig.value = updated
+                prefs.edit()
+                    .putString("cloud_db_config_json", jsonFormatter.encodeToString(CloudDbConfig.serializer(), updated))
+                    .apply()
+                _scannerToastMessage.value = "☁️ Synced ${questionVault.value.size} Questions & ${registeredAspirants.value.size} Aspirants with ${updated.provider}!"
+            } finally {
+                _isSyncingCloud.value = false
+            }
+        }
+    }
+
     private suspend fun syncLocalDatabaseBackupFile() {
         try {
-            val backupJson = repository.exportVaultAsJson()
+            val backupJson = repository.exportFullDatabaseBundleJson()
             val backupFile = java.io.File(getApplication<Application>().filesDir, "wbp_question_database_backup.json")
             backupFile.writeText(backupJson)
         } catch (_: Exception) {
@@ -650,6 +1056,23 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
             // Sync persistent JSON backup file in internal filesDir for 4,000+ questions & images
             syncLocalDatabaseBackupFile()
 
+            if (FirebaseAuth.getInstance().currentUser != null) {
+                questions.forEach { q ->
+                    firestoreRepository.createQuestion(
+                        subject = q.subject,
+                        chapter = q.effectiveChapterName(),
+                        isPyq = q.isPyq,
+                        pyqExam = q.pyqExam.takeIf { it.isNotBlank() },
+                        pyqYear = q.pyqYear.takeIf { it.isNotBlank() },
+                        questionBn = q.displayQuestionText(),
+                        optionsBn = q.displayOptions(),
+                        correctIndex = q.correctIndex,
+                        explanationBn = q.displayExplanationBn(),
+                        customId = q.id.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(100)
+                    )
+                }
+            }
+
             prefs.edit()
                 .putInt("vault_total_saved_count", report.afterScanTotal)
                 .apply()
@@ -662,16 +1085,16 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 1-Click Database Backup Export (.json):
-     * Exports all custom & structured questions in the Question Bank as a formatted JSON string.
+     * 1-Click Full Database Backup Export (.json):
+     * Exports all structured questions, registered aspirants, and test attempts as a formatted JSON bundle.
      */
     fun exportDatabaseBackupJson(onResult: (String) -> Unit) {
         viewModelScope.launch {
             try {
-                val jsonStr = repository.exportVaultAsJson()
+                val jsonStr = repository.exportFullDatabaseBundleJson()
                 val backupFile = java.io.File(getApplication<Application>().filesDir, "wbp_question_database_backup.json")
                 backupFile.writeText(jsonStr)
-                _scannerToastMessage.value = "📤 Database Backup (.json) generated (${questionVault.value.size} total questions)!"
+                _scannerToastMessage.value = "📤 Full Database Backup (.json) generated (${questionVault.value.size} questions, ${registeredAspirants.value.size} aspirants)!"
                 onResult(jsonStr)
             } catch (e: Exception) {
                 _scannerToastMessage.value = "⚠️ Export failed: ${e.localizedMessage ?: "Unknown error"}"
@@ -1377,6 +1800,34 @@ class WbpViewModel(application: Application) : AndroidViewModel(application) {
                     timeTakenSeconds = timeTaken
                 )
             )
+
+            // Sync Aspirant's test attempt count & average score in Registered Aspirants directory
+            val activeAspirant = _currentAspirant.value
+            if (activeAspirant != null) {
+                val scaledScoreOutOf85 = if (qList.isNotEmpty()) (netScore * 85.0) / qList.size else netScore
+                repository.recordAspirantTestScore(activeAspirant.email, scaledScoreOutOf85)
+                val refreshed = repository.getAspirantByEmail(activeAspirant.email)
+                if (refreshed != null) {
+                    saveAspirantSession(refreshed)
+                    if (FirebaseAuth.getInstance().currentUser != null) {
+                        firestoreRepository.recordTestAttempt(
+                            testTitle = titleToSave,
+                            scoreObtained = netScore,
+                            maxMarks = qList.size * 1.0,
+                            accuracyPercent = accuracy
+                        )
+                        firestoreRepository.upsertAspirantProfile(
+                            fullName = refreshed.fullName,
+                            email = refreshed.email,
+                            casteCategory = refreshed.casteCategory,
+                            targetExam = refreshed.targetExam,
+                            testsAttempted = refreshed.testsAttempted,
+                            totalScoreAccumulated = refreshed.averageScore * refreshed.testsAttempted
+                        )
+                    }
+                }
+            }
+            syncLocalDatabaseBackupFile()
         }
     }
 

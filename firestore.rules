@@ -1,0 +1,169 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // 1. AspirantUser Schema Validation Helper
+    function isValidAspirantUser(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 100 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+             data.casteCategory is string && data.casteCategory in ['UR', 'OBC_A', 'OBC_B', 'SC', 'ST', 'GORKHA_RAJBANSHI'] &&
+             data.targetExam is string && data.targetExam in ['WBP_CONSTABLE_85', 'KP_CONSTABLE_85', 'WBP_KP_SI_200', 'WBP_LADY_CONSTABLE_85'] &&
+             data.testsAttempted is int && data.testsAttempted >= 0 &&
+             (data.totalScoreAccumulated is int || data.totalScoreAccumulated is float) && data.totalScoreAccumulated >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 2. VaultQuestion Schema Validation Helper
+    function isValidVaultQuestion(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.subject is string && data.subject in ['GK', 'MATH', 'REASONING', 'ENGLISH', 'Math', 'Reasoning', 'English'] &&
+             data.chapter is string && data.chapter.size() >= 1 && data.chapter.size() <= 120 &&
+             data.isPyq is bool &&
+             (!('pyqExam' in data) || data.pyqExam == null || (data.pyqExam is string && data.pyqExam.size() <= 120)) &&
+             (!('pyqYear' in data) || data.pyqYear == null || (data.pyqYear is string && data.pyqYear.size() <= 20)) &&
+             data.questionBn is string && data.questionBn.size() >= 1 && data.questionBn.size() <= 2000 &&
+             data.optionsBn is list && data.optionsBn.size() == 4 &&
+             data.optionsBn[0] is string && data.optionsBn[0].size() >= 1 && data.optionsBn[0].size() <= 500 &&
+             data.correctIndex is int && data.correctIndex >= 0 && data.correctIndex <= 3 &&
+             data.explanationBn is string && data.explanationBn.size() <= 3000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 3. TestAttempt Schema Validation Helper
+    function isValidTestAttempt(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.testTitle is string && data.testTitle.size() >= 1 && data.testTitle.size() <= 200 &&
+             (data.scoreObtained is int || data.scoreObtained is float) &&
+             (data.maxMarks is int || data.maxMarks is float) && data.maxMarks > 0 &&
+             data.accuracyPercent is int && data.accuracyPercent >= 0 && data.accuracyPercent <= 100 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // Collection: /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'fullName', 'email', 'casteCategory', 'targetExam',
+                         'testsAttempted', 'totalScoreAccumulated', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'fullName', 'email', 'casteCategory', 'targetExam',
+                         'testsAttempted', 'totalScoreAccumulated', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidAspirantUser(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidAspirantUser(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isAdmin() ||
+                         (request.auth.uid == userId &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'fullName', 'casteCategory', 'targetExam',
+                            'testsAttempted', 'totalScoreAccumulated', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+    }
+
+    // Collection: /questions/{questionId}
+    match /questions/{questionId} {
+      allow get: if isSignedIn() && isValidId(questionId) && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(questionId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'subject', 'chapter', 'isPyq', 'questionBn',
+                         'optionsBn', 'correctIndex', 'explanationBn', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'subject', 'chapter', 'isPyq', 'pyqExam', 'pyqYear',
+                         'questionBn', 'optionsBn', 'correctIndex', 'explanationBn', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidVaultQuestion(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(questionId) &&
+                       isValidVaultQuestion(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt && (
+                         isAdmin() ||
+                         (existing().userId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'subject', 'chapter', 'isPyq', 'pyqExam', 'pyqYear',
+                            'questionBn', 'optionsBn', 'correctIndex', 'explanationBn', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(questionId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: /test_attempts/{attemptId}
+    match /test_attempts/{attemptId} {
+      allow get: if isSignedIn() && isValidId(attemptId) && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(attemptId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'testTitle', 'scoreObtained', 'maxMarks', 'accuracyPercent', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'testTitle', 'scoreObtained', 'maxMarks', 'accuracyPercent', 'createdAt'
+                       ]) &&
+                       isValidTestAttempt(incoming());
+
+      // Test attempts are append-only history records
+      allow update: if false;
+
+      allow delete: if isSignedIn() && isValidId(attemptId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: /admins/{adminUid}
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && request.auth.uid == adminUid;
+      allow list, create, update, delete: if false;
+    }
+  }
+}

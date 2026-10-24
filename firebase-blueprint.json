@@ -1,0 +1,209 @@
+{
+  "entities": {
+    "AspirantUser": {
+      "title": "AspirantUser",
+      "description": "Registered WBP & KP aspirant profile with target exam, caste category, and performance summary.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the aspirant owner."
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Full name of the aspirant."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of the aspirant."
+        },
+        "casteCategory": {
+          "type": "string",
+          "enum": ["UR", "OBC_A", "OBC_B", "SC", "ST", "GORKHA_RAJBANSHI"],
+          "description": "Registered caste/category for cut-off and PMT relaxations."
+        },
+        "targetExam": {
+          "type": "string",
+          "enum": ["WBP_CONSTABLE_85", "KP_CONSTABLE_85", "WBP_KP_SI_200", "WBP_LADY_CONSTABLE_85"],
+          "description": "Selected target police exam."
+        },
+        "testsAttempted": {
+          "type": "integer",
+          "description": "Total number of mock tests attempted."
+        },
+        "totalScoreAccumulated": {
+          "type": "number",
+          "description": "Cumulative score across all attempted mock tests."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp populated via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp populated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "fullName",
+        "email",
+        "casteCategory",
+        "targetExam",
+        "testsAttempted",
+        "totalScoreAccumulated",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VaultQuestion": {
+      "title": "VaultQuestion",
+      "description": "Structured exam question with subject, chapter, PYQ metadata, and Bengali explanation.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who created/synced the question."
+        },
+        "subject": {
+          "type": "string",
+          "enum": ["GK", "MATH", "REASONING", "ENGLISH", "Math", "Reasoning", "English"],
+          "description": "Subject category."
+        },
+        "chapter": {
+          "type": "string",
+          "description": "Exact chapter name mapped to the chosen subject."
+        },
+        "isPyq": {
+          "type": "boolean",
+          "description": "Whether this question is a Previous Year Question (PYQ)."
+        },
+        "pyqExam": {
+          "type": "string",
+          "description": "PYQ exam name when isPyq is true."
+        },
+        "pyqYear": {
+          "type": "string",
+          "description": "PYQ year (2005-2026) when isPyq is true."
+        },
+        "questionBn": {
+          "type": "string",
+          "description": "Question stem in Bengali (or English for English subject)."
+        },
+        "optionsBn": {
+          "type": "array",
+          "description": "Array of 4 option strings [Option A, Option B, Option C, Option D]."
+        },
+        "correctIndex": {
+          "type": "integer",
+          "description": "Correct option index (0 to 3)."
+        },
+        "explanationBn": {
+          "type": "string",
+          "description": "Step-by-step shortcut explanation in Bengali."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp populated via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp populated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "subject",
+        "chapter",
+        "isPyq",
+        "questionBn",
+        "optionsBn",
+        "correctIndex",
+        "explanationBn",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TestAttempt": {
+      "title": "TestAttempt",
+      "description": "Recorded mock test attempt by an aspirant.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the aspirant who took the test."
+        },
+        "testTitle": {
+          "type": "string",
+          "description": "Title of the mock test."
+        },
+        "scoreObtained": {
+          "type": "number",
+          "description": "Net marks scored after negative marking."
+        },
+        "maxMarks": {
+          "type": "number",
+          "description": "Total maximum marks of the test."
+        },
+        "accuracyPercent": {
+          "type": "integer",
+          "description": "Accuracy percentage (0 to 100)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Attempt completion timestamp populated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "testTitle",
+        "scoreObtained",
+        "maxMarks",
+        "accuracyPercent",
+        "createdAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin registry document keyed by admin UID.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified admin email."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when admin was registered."
+        }
+      },
+      "required": ["email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/AspirantUser" },
+      "description": "Stores individual aspirant profiles isolated by userId."
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/VaultQuestion" },
+      "description": "Stores cloud-synced questions owned by userId or accessible by admin."
+    },
+    "/test_attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/TestAttempt" },
+      "description": "Stores immutable mock test attempt records isolated by userId."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Read-only admin membership lookup table."
+    }
+  }
+}

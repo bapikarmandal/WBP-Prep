@@ -92,7 +92,8 @@ fun AiTutorScreen(
     onSelectDistrict: (com.example.data.WbDistrict) -> Unit = {},
     onSubmitInterviewAnswer: (String) -> Unit = {},
     onResetInterview: () -> Unit = {},
-    initialInterviewMode: Boolean = false
+    initialInterviewMode: Boolean = false,
+    onOpenPetTrackerTab: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isBn = language == AppLanguage.BENGALI
@@ -152,7 +153,7 @@ fun AiTutorScreen(
     ) {
         Spacer(modifier = Modifier.height(6.dp))
 
-        // iOS-Style Segmented Control: [Doubt Solver (Chat + Photo)] vs [15-Mark Board Interview]
+        // Top Segmented Switcher: [1. Gemini AI Doubt Solver] | [2. PMT & PET Tracker] | [15-Mark Interview]
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -175,14 +176,38 @@ fun AiTutorScreen(
                     shadowElevation = if (!isInterviewMode) 1.dp else 0.dp
                 ) {
                     Box(
-                        modifier = Modifier.padding(vertical = 9.dp),
+                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isBn) "ডাউট সলভার ও ফটো" else "Doubt Solver & Photo",
-                            style = MaterialTheme.typography.labelLarge,
+                            text = if (isBn) "AI ডাউট সলভার" else "AI Doubt Solver",
+                            style = MaterialTheme.typography.labelMedium,
                             color = if (!isInterviewMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .clickable { onOpenPetTrackerTab() }
+                        .testTag("ai_tutor_pet_tracker_tab"),
+                    color = Color.Transparent,
+                    shape = RoundedCornerShape(9.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "PMT & PET Tracker",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
                     }
                 }
@@ -198,14 +223,15 @@ fun AiTutorScreen(
                     shadowElevation = if (isInterviewMode) 1.dp else 0.dp
                 ) {
                     Box(
-                        modifier = Modifier.padding(vertical = 9.dp),
+                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isBn) "মক ইন্টারভিউ (১৫ নম্বর)" else "15-Mark Interview",
-                            style = MaterialTheme.typography.labelLarge,
+                            text = if (isBn) "মক ইন্টারভিউ" else "15M Interview",
+                            style = MaterialTheme.typography.labelMedium,
                             color = if (isInterviewMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
                     }
                 }

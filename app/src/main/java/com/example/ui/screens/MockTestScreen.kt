@@ -100,7 +100,8 @@ import kotlin.math.roundToInt
 private enum class SolutionFilter(val labelEn: String, val labelBn: String) {
     ALL("All", "সব (All)"),
     INCORRECT("Incorrect", "ভুল উত্তর (Incorrect)"),
-    UNATTEMPTED("Unattempted", "অনুত্তরিত (Unattempted)")
+    UNATTEMPTED("Unattempted", "অনুত্তরিত (Unattempted)"),
+    BOOKMARKED("Bookmarked", "বুকমার্ক করা (Bookmarked)")
 }
 
 @Composable
@@ -110,6 +111,8 @@ fun MockTestScreen(
     questionVault: List<QuizQuestion> = emptyList(),
     seenQuestionIds: Set<String> = emptySet(),
     bulkGeneratingTarget: String? = null,
+    isAdmin: Boolean = false,
+    aspirantProfile: com.example.data.AspirantProfile? = null,
     isImportingPyqBook: Boolean = false,
     scannerCurrentPage: Int = 0,
     scannerTotalPages: Int = 0,
@@ -191,6 +194,7 @@ fun MockTestScreen(
             remainingSeconds = remainingSeconds,
             totalDurationSeconds = totalDurationSeconds,
             statusBanner = statusBanner,
+            aspirantProfile = aspirantProfile,
             getPaletteStatus = getPaletteStatus,
             onSelectQuestion = onSelectQuestion,
             onSelectOption = onSelectOption,
@@ -212,6 +216,8 @@ fun MockTestScreen(
             questionVault = questionVault,
             seenQuestionIds = seenQuestionIds,
             bulkGeneratingTarget = bulkGeneratingTarget,
+            isAdmin = isAdmin,
+            aspirantProfile = aspirantProfile,
             isImportingPyqBook = isImportingPyqBook,
             scannerCurrentPage = scannerCurrentPage,
             scannerTotalPages = scannerTotalPages,
@@ -268,6 +274,8 @@ private fun TestSeriesHubView(
     questionVault: List<QuizQuestion>,
     seenQuestionIds: Set<String>,
     bulkGeneratingTarget: String?,
+    isAdmin: Boolean = false,
+    aspirantProfile: com.example.data.AspirantProfile? = null,
     isImportingPyqBook: Boolean,
     scannerCurrentPage: Int,
     scannerTotalPages: Int,
@@ -319,8 +327,12 @@ private fun TestSeriesHubView(
     val fullMockSeries = remember(allSeries) { allSeries.filter { it.isFullMock } }
     val sectionalSeries = remember(allSeries) { allSeries.filter { !it.isFullMock } }
     val totalVaultCount = questionVault.size
+    val visibleFilters = remember(isAdmin) {
+        if (isAdmin) TestSeriesFilter.entries
+        else TestSeriesFilter.entries.filterNot { it == TestSeriesFilter.MY_UPLOADED }
+    }
 
-    if (showPyqImporterModal) {
+    if (showPyqImporterModal && isAdmin) {
         PyqBookImporterDialog(
             isBn = isBn,
             isImporting = isImportingPyqBook,
@@ -357,13 +369,13 @@ private fun TestSeriesHubView(
         contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Horizontal Filter Pill Bar: [All Tests], [Full Mock (85M)], [Subject-Wise], [PYQ Vault (2005–Present)], [Chapter-Wise Practice], [🗂️ Manage Question Database (Count)], [Mistake Retry]
+        // Horizontal Filter Pill Bar (Manage Question Database hidden for Aspirants)
         item {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(TestSeriesFilter.entries) { filter ->
+                items(visibleFilters) { filter ->
                     val isSelected = selectedFilter == filter
                     val baseLabel = if (isBn) filter.labelBn else filter.labelEn
                     val pillLabel = if (filter == TestSeriesFilter.MY_UPLOADED) {
@@ -401,7 +413,7 @@ private fun TestSeriesHubView(
             }
         }
 
-        // Top Question Vault Master Bar + "✍️ Manual Question Studio (Add 1–50 Questions)" Button
+        // Top Question Vault Master Bar ("✍️ Manual Question Studio" button visible only in Admin Mode)
         item {
             QuestionVaultMasterBar(
                 isBn = isBn,
@@ -411,6 +423,7 @@ private fun TestSeriesHubView(
                 scannerCurrentPage = scannerCurrentPage,
                 scannerTotalPages = scannerTotalPages,
                 scannerAddedCount = scannerAddedCount,
+                isAdmin = isAdmin,
                 onOpenImporterModal = { showPyqImporterModal = true },
                 onResetSeenHistory = onResetSeenHistory
             )
@@ -572,8 +585,8 @@ private fun TestSeriesHubView(
             }
         }
 
-        // SECTION 0: MANAGE QUESTION DATABASE (Database Explorer, Filter, Edit/Delete & 1-Click JSON Backup)
-        if (selectedFilter == TestSeriesFilter.MY_UPLOADED || selectedFilter == TestSeriesFilter.ALL) {
+        // SECTION 0: MANAGE QUESTION DATABASE (Admin Mode Only)
+        if (isAdmin && (selectedFilter == TestSeriesFilter.MY_UPLOADED || selectedFilter == TestSeriesFilter.ALL)) {
             item {
                 MyUploadedQuestionsVaultSection(
                     isBn = isBn,
@@ -653,7 +666,9 @@ private fun TestSeriesHubView(
                     onStartTest = { onStartTestSeriesItem(testItem) },
                     onViewSolutions = { onViewSolutionsForTestSeriesItem(testItem) },
                     onGenerateAiSectional = { onGenerateAiSectionalTest(subCode) },
-                    onBulkAdd50ToVault = { onBulkAdd50Questions(subCode, null, testItem.titleEn) }
+                    onBulkAdd50ToVault = if (isAdmin) {
+                        { onBulkAdd50Questions(subCode, null, testItem.titleEn) }
+                    } else null
                 )
             }
         }
@@ -666,13 +681,14 @@ private fun TestSeriesHubView(
                     questionVault = questionVault,
                     seenQuestionIds = seenQuestionIds,
                     bulkGeneratingTarget = bulkGeneratingTarget,
+                    isAdmin = isAdmin,
                     onStartExamGroupTest = onStartExamGroupTest,
                     onBulkAdd50Questions = onBulkAdd50Questions
                 )
             }
         }
 
-        // SECTION 4: CHAPTER-WISE PRACTICE (53 OFFICIAL WBP & KP CHAPTERS ACROSS GK, MATH, REASONING, ENGLISH)
+        // SECTION 4: CHAPTER-WISE PRACTICE (55 OFFICIAL WBP & KP CHAPTERS ACROSS GK, MATH, REASONING, ENGLISH)
         if (selectedFilter == TestSeriesFilter.ALL || selectedFilter == TestSeriesFilter.CHAPTER_WISE) {
             item {
                 WbpChapterWiseSection(
@@ -680,6 +696,7 @@ private fun TestSeriesHubView(
                     questionVault = questionVault,
                     seenQuestionIds = seenQuestionIds,
                     bulkGeneratingTarget = bulkGeneratingTarget,
+                    isAdmin = isAdmin,
                     onStartChapterTest = onStartChapterTest,
                     onBulkAdd50ForChapter = { chap ->
                         onBulkAdd50Questions(chap.subject, chap.id, chap.titleEn)
@@ -1008,6 +1025,7 @@ private fun TestbookLiveExamView(
     remainingSeconds: Int,
     totalDurationSeconds: Int,
     statusBanner: String?,
+    aspirantProfile: com.example.data.AspirantProfile? = null,
     getPaletteStatus: (String) -> QuestionPaletteStatus,
     onSelectQuestion: (Int) -> Unit,
     onSelectOption: (String, Int) -> Unit,
@@ -1769,6 +1787,7 @@ private fun TestbookLiveExamView(
                         selectedAnswers = selectedAnswers,
                         questionTimeSpent = questionTimeSpent,
                         timeTakenSeconds = max(1, totalDurationSeconds - remainingSeconds),
+                        defaultCasteCategory = aspirantProfile?.resolvedCasteCategory,
                         onRetake = onRestartFullMock,
                         onBackToHub = onExitLiveExamToHub,
                         onRetryMistakes = onRetryMistakes,
@@ -1793,11 +1812,11 @@ private fun TestbookLiveExamView(
                             modifier = Modifier.padding(top = 4.dp)
                         )
 
-                        Row(
+                        LazyRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            SolutionFilter.entries.forEach { filter ->
+                            items(SolutionFilter.entries) { filter ->
                                 val isSel = selectedSolutionFilter == filter
                                 val count = when (filter) {
                                     SolutionFilter.ALL -> questions.size
@@ -1807,6 +1826,9 @@ private fun TestbookLiveExamView(
                                     }
                                     SolutionFilter.UNATTEMPTED -> questions.count { q ->
                                         selectedAnswers[q.id] == null
+                                    }
+                                    SolutionFilter.BOOKMARKED -> questions.count { q ->
+                                        q.id in bookmarkedIds
                                     }
                                 }
                                 Surface(
@@ -1836,6 +1858,7 @@ private fun TestbookLiveExamView(
                         SolutionFilter.ALL -> true
                         SolutionFilter.INCORRECT -> userChoice != null && userChoice != q.correctIndex
                         SolutionFilter.UNATTEMPTED -> userChoice == null
+                        SolutionFilter.BOOKMARKED -> q.id in bookmarkedIds
                     }
                 }
 
@@ -2359,7 +2382,22 @@ private enum class WbpReservationCategory(
     OBC_B("OBC-B", 51.0),
     OBC_A("OBC-A", 46.5),
     SC("SC", 47.0),
-    ST("ST", 41.5)
+    ST("ST", 41.5),
+    GORKHA("Gorkha / Hill", 43.0);
+
+    companion object {
+        fun fromAspirantCategory(cat: com.example.data.AspirantCasteCategory?): WbpReservationCategory {
+            return when (cat) {
+                com.example.data.AspirantCasteCategory.GENERAL -> UR
+                com.example.data.AspirantCasteCategory.OBC_B -> OBC_B
+                com.example.data.AspirantCasteCategory.OBC_A -> OBC_A
+                com.example.data.AspirantCasteCategory.SC -> SC
+                com.example.data.AspirantCasteCategory.ST -> ST
+                com.example.data.AspirantCasteCategory.GORKHA -> GORKHA
+                null -> UR
+            }
+        }
+    }
 }
 
 @Composable
@@ -2369,6 +2407,7 @@ private fun ScorecardSummaryCard(
     selectedAnswers: Map<String, Int>,
     questionTimeSpent: Map<String, Int>,
     timeTakenSeconds: Int,
+    defaultCasteCategory: com.example.data.AspirantCasteCategory? = null,
     onRetake: () -> Unit,
     onBackToHub: () -> Unit,
     onRetryMistakes: () -> Unit,
@@ -2376,7 +2415,9 @@ private fun ScorecardSummaryCard(
     hasMistakes: Boolean,
     onAskAiWeakTopic: (String) -> Unit
 ) {
-    var selectedCategory by remember { mutableStateOf(WbpReservationCategory.UR) }
+    var selectedCategory by remember(defaultCasteCategory) {
+        mutableStateOf(WbpReservationCategory.fromAspirantCategory(defaultCasteCategory))
+    }
 
     var correct = 0
     var wrong = 0

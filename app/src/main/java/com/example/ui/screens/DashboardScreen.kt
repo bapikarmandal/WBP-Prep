@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppLanguage
+import com.example.data.AspirantProfile
 import com.example.data.ExamType
 import com.example.data.MistakeNotebookEntity
 import com.example.data.MockTestResultEntity
@@ -87,6 +88,10 @@ fun DashboardScreen(
     questionVault: List<QuizQuestion> = emptyList(),
     seenQuestionIds: Set<String> = emptySet(),
     bulkGeneratingTarget: String? = null,
+    isAdmin: Boolean = false,
+    aspirantProfile: AspirantProfile? = null,
+    onOpenProfileDialog: () -> Unit = {},
+    onLogoutUser: () -> Unit = {},
     onSelectExam: (ExamType) -> Unit,
     onStartQuickQuiz: () -> Unit,
     onStartRetryMistakes: () -> Unit,
@@ -114,6 +119,121 @@ fun DashboardScreen(
         contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+
+        // 0. ASPIRANT PERSONALIZED PROFILE CARD (Greet by name, Target Exam badge, Category badge, Edit/Logout)
+        if (aspirantProfile != null) {
+            item {
+                val cat = aspirantProfile.resolvedCasteCategory
+                val target = aspirantProfile.resolvedTargetExam
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("aspirant_dashboard_profile_card"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "ASPIRANT PROFILE • PERSONALIZED PREP",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    letterSpacing = 0.7.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Welcome, ${aspirantProfile.fullName} 👋",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onOpenProfileDialog() }
+                                        .testTag("dashboard_edit_profile_button"),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Edit Profile",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onLogoutUser() }
+                                        .testTag("dashboard_logout_button"),
+                                    color = CrimsonWrong.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Log Out",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CrimsonWrong,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Target Exam Badge & Caste/Category Badge Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "🎯 ${target.shortBadge}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+
+                            Surface(
+                                color = AmberWarning.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "🛡️ Category: ${cat.shortBadge} (Cut-Off: ${cat.safeCutoffOutOf85}/85)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberWarning,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 1. TOP: Clean Minimal Hero Card with Exam Selector, Streak Pill & Single "Start Daily Quiz" Button
         item {
@@ -189,13 +309,18 @@ fun DashboardScreen(
                         }
                     }
 
-                    // Clean Exam Selector Dropdown
+                    // Clean Exam Selector (Synced/Locked to Aspirant's Registered Target Exam when logged in as Aspirant)
                     Box {
+                        val targetLabel = aspirantProfile?.resolvedTargetExam?.displayLabel
+                            ?: (if (isBn) selectedExam.titleBn else selectedExam.titleEn)
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { examDropdownExpanded = true }
+                                .clickable {
+                                    if (aspirantProfile != null) onOpenProfileDialog()
+                                    else examDropdownExpanded = true
+                                }
                                 .testTag("exam_selector_dropdown"),
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             shape = RoundedCornerShape(12.dp)
@@ -210,13 +335,16 @@ fun DashboardScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (isBn) "নির্বাচিত পরীক্ষা" else "TARGET EXAM",
+                                        text = if (aspirantProfile != null)
+                                            "LOCKED TARGET EXAM (SYNCED FROM PROFILE)"
+                                        else
+                                            (if (isBn) "নির্বাচিত পরীক্ষা" else "TARGET EXAM"),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = if (isBn) selectedExam.titleBn else selectedExam.titleEn,
+                                        text = targetLabel,
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -558,13 +686,15 @@ fun DashboardScreen(
                                 modifier = Modifier.testTag("home_vault_badge_${subject.id.lowercase()}")
                             )
 
-                            // ⚡ Bulk Add +50 New PYQ-Pattern Questions to Vault button
-                            BulkAdd50VaultButton(
-                                isBn = isBn,
-                                isLoading = bulkGeneratingTarget == subject.id,
-                                testTag = "home_bulk_add_50_${subject.id.lowercase()}",
-                                onClick = { onBulkAdd50Questions(subject.id) }
-                            )
+                            // ⚡ Bulk Add +50 New PYQ-Pattern Questions to Vault button (Admin Only)
+                            if (isAdmin) {
+                                BulkAdd50VaultButton(
+                                    isBn = isBn,
+                                    isLoading = bulkGeneratingTarget == subject.id,
+                                    testTag = "home_bulk_add_50_${subject.id.lowercase()}",
+                                    onClick = { onBulkAdd50Questions(subject.id) }
+                                )
+                            }
                         }
                     }
                 }

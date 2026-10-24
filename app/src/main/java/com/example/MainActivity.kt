@@ -13,30 +13,31 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.HorizontalDivider
@@ -48,7 +49,6 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -67,13 +67,21 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppLanguage
+import com.example.data.AspirantProfile
+import com.example.data.UserRole
 import com.example.ui.BottomNavTab
 import com.example.ui.WbpViewModel
+import com.example.ui.screens.AdminControlPanelScreen
 import com.example.ui.screens.AiTutorScreen
+import com.example.ui.screens.AspirantProfileDialog
 import com.example.ui.screens.DashboardScreen
+import com.example.ui.screens.DualModeAuthScreen
 import com.example.ui.screens.MockTestScreen
 import com.example.ui.screens.PetTrackerScreen
 import com.example.ui.screens.SyllabusScreen
+import com.example.ui.theme.AmberWarning
+import com.example.ui.theme.CrimsonWrong
+import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -108,6 +116,14 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
     val selectedExam by wbpViewModel.selectedExam.collectAsStateWithLifecycle()
     val dailyStreak by wbpViewModel.dailyStreak.collectAsStateWithLifecycle()
     val currentTab by wbpViewModel.currentTab.collectAsStateWithLifecycle()
+
+    val userRole by wbpViewModel.userRole.collectAsStateWithLifecycle()
+    val currentAspirant by wbpViewModel.currentAspirant.collectAsStateWithLifecycle()
+    val registeredAspirants by wbpViewModel.registeredAspirants.collectAsStateWithLifecycle()
+    val authErrorMessage by wbpViewModel.authErrorMessage.collectAsStateWithLifecycle()
+    val adminPasskey by wbpViewModel.adminPasskey.collectAsStateWithLifecycle()
+    val cloudDbConfig by wbpViewModel.cloudDbConfig.collectAsStateWithLifecycle()
+    val isSyncingCloud by wbpViewModel.isSyncingCloud.collectAsStateWithLifecycle()
 
     val syllabusTopics by wbpViewModel.syllabusTopics.collectAsStateWithLifecycle()
     val mockResults by wbpViewModel.mockResults.collectAsStateWithLifecycle()
@@ -154,9 +170,54 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
 
     var openAiTutorInInterviewMode by remember { mutableStateOf(false) }
     var openSyllabusInFlashcardsMode by remember { mutableStateOf(false) }
+    var showAspirantProfileDialog by remember { mutableStateOf(false) }
 
+    // 1. DUAL-MODE AUTHENTICATION GATE: Show Login / Sign-Up screen when unauthenticated
+    if (userRole == UserRole.UNAUTHENTICATED) {
+        DualModeAuthScreen(
+            authErrorMessage = authErrorMessage,
+            onClearError = { wbpViewModel.clearAuthError() },
+            onLoginAspirant = { email, password ->
+                wbpViewModel.loginAspirant(email, password)
+            },
+            onSignUpAspirant = { fullName, email, password, category, targetExam ->
+                wbpViewModel.signUpAspirant(fullName, email, password, category, targetExam)
+            },
+            onQuickDemoAspirantLogin = {
+                wbpViewModel.quickDemoAspirantLogin()
+            },
+            onLoginAdmin = { email, passkey ->
+                wbpViewModel.loginAdmin(email, passkey)
+            },
+            onSignInWithGoogleIdToken = { idToken, displayName, email, category, targetExam ->
+                wbpViewModel.signInWithGoogleIdToken(idToken, displayName, email, category, targetExam)
+            }
+        )
+        return
+    }
+
+    val isAdmin = userRole == UserRole.ADMIN
     val isBn = language == AppLanguage.BENGALI
     val isFullScreenExamOverlay = currentTab == BottomNavTab.MOCK_TEST && isLiveExamActive
+
+    // Aspirant Profile Edit / Logout Modal (with 1-Tap Switch to Admin Studio)
+    if (showAspirantProfileDialog && currentAspirant != null) {
+        AspirantProfileDialog(
+            aspirant = currentAspirant!!,
+            onDismiss = { showAspirantProfileDialog = false },
+            onUpdateProfile = { name, cat, exam ->
+                wbpViewModel.updateCurrentAspirantProfile(name, cat, exam)
+            },
+            onSwitchToAdminOneTap = {
+                showAspirantProfileDialog = false
+                wbpViewModel.switchRoleOneTap()
+            },
+            onLogout = {
+                showAspirantProfileDialog = false
+                wbpViewModel.logoutUser()
+            }
+        )
+    }
 
     // Mandatory BackHandler for custom tab navigation
     if (currentTab != BottomNavTab.HOME && !isFullScreenExamOverlay) {
@@ -165,11 +226,19 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
         }
     }
 
-    // Calculate bottom gesture-bar safe-area padding: max(env(safe-area-inset-bottom, 0px), 16.dp)
+    val visibleNavTabs = remember(isAdmin) {
+        if (isAdmin) {
+            BottomNavTab.entries
+        } else {
+            BottomNavTab.entries.filter { it != BottomNavTab.ADMIN_PANEL }
+        }
+    }
+
+    // Calculate bottom gesture-bar safe-area padding: pb-6 (min 24.dp) + pt-2 (8.dp)
     val navBarBottomInset = WindowInsets.navigationBars
         .asPaddingValues()
         .calculateBottomPadding()
-        .coerceAtLeast(16.dp)
+        .coerceAtLeast(24.dp)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -178,9 +247,13 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
         topBar = {
             if (!isFullScreenExamOverlay) {
                 WbpTopHeader(
-                    language = language,
                     isDark = isDark,
-                    onToggleLanguage = { wbpViewModel.toggleLanguage() },
+                    isAdmin = isAdmin,
+                    aspirantProfile = currentAspirant,
+                    onOpenProfile = { showAspirantProfileDialog = true },
+                    onOpenAdminPanel = { wbpViewModel.selectTab(BottomNavTab.ADMIN_PANEL) },
+                    onSwitchRoleOneTap = { wbpViewModel.switchRoleOneTap() },
+                    onLogout = { wbpViewModel.logoutUser() },
                     onToggleDark = { wbpViewModel.toggleDarkMode() }
                 )
             }
@@ -195,7 +268,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = navBarBottomInset)
+                            .padding(top = 8.dp, bottom = navBarBottomInset)
                     ) {
                         HorizontalDivider(
                             thickness = 1.dp,
@@ -206,7 +279,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                             tonalElevation = 0.dp,
                             windowInsets = WindowInsets(0, 0, 0, 0)
                         ) {
-                            BottomNavTab.entries.forEach { tab ->
+                            visibleNavTabs.forEach { tab ->
                                 val isSelected = currentTab == tab
                                 val icon = when (tab) {
                                     BottomNavTab.HOME -> if (isSelected) Icons.Default.Home else Icons.Outlined.Home
@@ -214,6 +287,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                                     BottomNavTab.AI_TUTOR -> if (isSelected) Icons.Default.AutoAwesome else Icons.Outlined.AutoAwesome
                                     BottomNavTab.PET_TRACKER -> if (isSelected) Icons.AutoMirrored.Filled.DirectionsRun else Icons.AutoMirrored.Outlined.DirectionsRun
                                     BottomNavTab.SYLLABUS -> Icons.AutoMirrored.Outlined.MenuBook
+                                    BottomNavTab.ADMIN_PANEL -> if (isSelected) Icons.Default.AdminPanelSettings else Icons.Outlined.AdminPanelSettings
                                 }
                                 NavigationBarItem(
                                     selected = isSelected,
@@ -234,9 +308,10 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                                         Text(
                                             text = if (isBn) tab.labelBn else tab.labelEn,
                                             style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 11.sp,
+                                                fontSize = if (visibleNavTabs.size >= 6) 10.sp else 11.sp,
                                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
-                                            )
+                                            ),
+                                            maxLines = 1
                                         )
                                     },
                                     colors = NavigationBarItemDefaults.colors(
@@ -264,7 +339,7 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .widthIn(max = 500.dp)
+                    .widthIn(max = 460.dp)
             ) {
                 when (currentTab) {
                     BottomNavTab.HOME -> DashboardScreen(
@@ -277,6 +352,10 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         questionVault = questionVault,
                         seenQuestionIds = seenQuestionIds,
                         bulkGeneratingTarget = bulkGeneratingTarget,
+                        isAdmin = isAdmin,
+                        aspirantProfile = currentAspirant,
+                        onOpenProfileDialog = { showAspirantProfileDialog = true },
+                        onLogoutUser = { wbpViewModel.logoutUser() },
                         onSelectExam = { wbpViewModel.selectExam(it) },
                         onStartQuickQuiz = { wbpViewModel.startQuickDailyQuiz() },
                         onStartRetryMistakes = { wbpViewModel.startRetryMistakesQuiz() },
@@ -334,6 +413,8 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         scannerErrorMessage = scannerErrorMessage,
                         scannerVerificationReport = scannerVerificationReport,
                         scannerToastMessage = scannerToastMessage,
+                        isAdmin = isAdmin,
+                        aspirantProfile = currentAspirant,
                         getPaletteStatus = { wbpViewModel.getPaletteStatus(it) },
                         onSelectQuestion = { wbpViewModel.goToQuestion(it) },
                         onSelectOption = { qId, opt -> wbpViewModel.selectOmrOption(qId, opt) },
@@ -422,12 +503,14 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         onSelectDistrict = { wbpViewModel.selectHomeDistrict(it) },
                         onSubmitInterviewAnswer = { wbpViewModel.submitInterviewAnswer(it) },
                         onResetInterview = { wbpViewModel.resetInterviewForDistrict() },
-                        initialInterviewMode = openAiTutorInInterviewMode
+                        initialInterviewMode = openAiTutorInInterviewMode,
+                        onOpenPetTrackerTab = { wbpViewModel.selectTab(BottomNavTab.PET_TRACKER) }
                     )
 
                     BottomNavTab.PET_TRACKER -> PetTrackerScreen(
                         language = language,
                         petRunLogs = petRunLogs,
+                        aspirantProfile = currentAspirant,
                         onSaveRun = { post, gender, dist, time, target, qual, pace ->
                             wbpViewModel.savePetRun(post, gender, dist, time, target, qual, pace)
                         },
@@ -444,11 +527,84 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
                         questionVault = questionVault,
                         seenQuestionIds = seenQuestionIds,
                         bulkGeneratingTarget = bulkGeneratingTarget,
+                        isAdmin = isAdmin,
                         onStartChapterTest = { chapter ->
                             wbpViewModel.startChapterPracticeTest(chapter)
                         },
                         onBulkAdd50ForChapter = { chapter ->
                             wbpViewModel.bulkAdd50QuestionsToVault(chapter.subject, chapter.chapterId, chapter.titleEn)
+                        }
+                    )
+
+                    BottomNavTab.ADMIN_PANEL -> AdminControlPanelScreen(
+                        questionVault = questionVault,
+                        registeredAspirants = registeredAspirants,
+                        cloudDbConfig = cloudDbConfig,
+                        isSyncingCloud = isSyncingCloud,
+                        adminPasskey = adminPasskey,
+                        isImportingPyqBook = isImportingPyqBook,
+                        scannerCurrentPage = scannerCurrentPage,
+                        scannerTotalPages = scannerTotalPages,
+                        scannerAddedCount = scannerAddedCount,
+                        scannerExtractedCount = scannerExtractedCount,
+                        scannerStep = scannerStep,
+                        scannerErrorMessage = scannerErrorMessage,
+                        scannerVerificationReport = scannerVerificationReport,
+                        scannerToastMessage = scannerToastMessage,
+                        isGeneratingExplanation = isGeneratingExplanation,
+                        onClearScannerToast = { wbpViewModel.clearScannerToastMessage() },
+                        onClearScannerError = { wbpViewModel.clearScannerErrorMessage() },
+                        onNotifyScannerInputLoaded = { wbpViewModel.notifyScannerInputLoaded() },
+                        onUpdateUploadedQuestion = { wbpViewModel.updateUploadedQuestion(it) },
+                        onDeleteUploadedQuestion = { wbpViewModel.deleteUploadedQuestion(it) },
+                        onStartUploadedQuestionsTest = { uploadedList ->
+                            wbpViewModel.startUploadedQuestionsQuiz(uploadedList)
+                            wbpViewModel.selectTab(BottomNavTab.MOCK_TEST)
+                        },
+                        onImportPyqBookContent = { rawText, base64Doc, docMime, subjectHint ->
+                            wbpViewModel.importPyqBookContent(rawText, base64Doc, docMime, subjectHint)
+                        },
+                        onScanSmartBatch = { rawTextOrUrl, attachments, declaredPageCount, subjectHint ->
+                            wbpViewModel.scanAndIngestSmartQuestionsBatch(
+                                rawTextOrUrl = rawTextOrUrl,
+                                attachments = attachments,
+                                declaredPageCount = declaredPageCount,
+                                subjectHint = subjectHint
+                            )
+                        },
+                        onSaveManualBatch = { batchList ->
+                            wbpViewModel.saveManualQuestionsBatch(batchList)
+                        },
+                        onAutoGenerateExplanation = { subject, chapter, questionBn, optionsBn, correctIndex, onResult ->
+                            wbpViewModel.autoGenerateBengaliExplanation(
+                                subject = subject,
+                                chapter = chapter,
+                                questionText = questionBn,
+                                options = optionsBn,
+                                correctIndex = correctIndex,
+                                onResult = onResult
+                            )
+                        },
+                        onExportDatabaseJson = { callback ->
+                            wbpViewModel.exportDatabaseBackupJson(callback)
+                        },
+                        onImportDatabaseJson = { rawJson ->
+                            wbpViewModel.importDatabaseBackupJson(rawJson)
+                        },
+                        onSaveCloudConfig = { cfg ->
+                            wbpViewModel.saveCloudDbConfig(cfg)
+                        },
+                        onTriggerCloudSync = {
+                            wbpViewModel.triggerCloudDatabaseSync()
+                        },
+                        onUpdateAdminPasskey = { newPass ->
+                            wbpViewModel.updateAdminPasskey(newPass)
+                        },
+                        onDeleteAspirant = { email ->
+                            wbpViewModel.deleteAspirantByEmail(email)
+                        },
+                        onLogoutAdmin = {
+                            wbpViewModel.logoutUser()
                         }
                     )
                 }
@@ -459,12 +615,16 @@ fun WbpPrepApp(wbpViewModel: WbpViewModel) {
 
 @Composable
 private fun WbpTopHeader(
-    language: AppLanguage,
     isDark: Boolean,
-    onToggleLanguage: () -> Unit,
+    isAdmin: Boolean,
+    aspirantProfile: AspirantProfile?,
+    onOpenProfile: () -> Unit,
+    onOpenAdminPanel: () -> Unit,
+    onSwitchRoleOneTap: () -> Unit,
+    onLogout: () -> Unit,
     onToggleDark: () -> Unit
 ) {
-    // Top safe-area offset: max(statusBarInset, 40.dp) so header items sit cleanly below the Android status bar
+    // Top safe-area offset: max(statusBarInset, 40.dp) -> pt-10 pb-3 px-4
     val topSafeClearance = WindowInsets.statusBars
         .asPaddingValues()
         .calculateTopPadding()
@@ -473,7 +633,7 @@ private fun WbpTopHeader(
     Column(modifier = Modifier.fillMaxWidth()) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
             tonalElevation = 0.dp
         ) {
             Row(
@@ -483,7 +643,7 @@ private fun WbpTopHeader(
                         top = topSafeClearance,
                         bottom = 12.dp,
                         start = 16.dp,
-                        end = 20.dp // 4.dp extra inward clearance from the right curved screen edge
+                        end = 16.dp
                     ),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -491,7 +651,7 @@ private fun WbpTopHeader(
                 // Left: Minimal App Logo & Title (100% English UI)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Surface(
                         modifier = Modifier.size(34.dp),
@@ -515,14 +675,135 @@ private fun WbpTopHeader(
                     )
                 }
 
-                // Right: Dark Mode Toggle Button
+                // Right: Role Badge + 1-Tap Role Switcher + Dark Mode Toggle
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (isAdmin) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onOpenAdminPanel() }
+                                .testTag("header_admin_mode_badge"),
+                            color = AmberWarning.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .border(1.dp, AmberWarning.copy(alpha = 0.55f), RoundedCornerShape(50))
+                                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AdminPanelSettings,
+                                    contentDescription = "Admin Studio",
+                                    tint = AmberWarning,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "ADMIN",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberWarning
+                                )
+                            }
+                        }
+
+                        // 1-Tap Switch to Aspirant Mode
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onSwitchRoleOneTap() }
+                                .testTag("header_one_tap_role_switcher"),
+                            color = EmeraldSuccess.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                text = "1-Tap Aspirant",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldSuccess,
+                                modifier = Modifier
+                                    .border(1.dp, EmeraldSuccess.copy(alpha = 0.45f), RoundedCornerShape(50))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable { onLogout() }
+                                .testTag("header_logout_button"),
+                            shape = CircleShape,
+                            color = CrimsonWrong.copy(alpha = 0.12f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Logout,
+                                    contentDescription = "Logout Admin",
+                                    tint = CrimsonWrong,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    } else if (aspirantProfile != null) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onOpenProfile() }
+                                .testTag("header_aspirant_profile_chip"),
+                            color = EmeraldSuccess.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .border(1.dp, EmeraldSuccess.copy(alpha = 0.45f), RoundedCornerShape(50))
+                                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Aspirant Profile",
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "${aspirantProfile.fullName.substringBefore(" ")} • ${aspirantProfile.resolvedCasteCategory.shortBadge}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldSuccess
+                                )
+                            }
+                        }
+
+                        // 1-Tap Switch to Admin Studio
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onSwitchRoleOneTap() }
+                                .testTag("header_one_tap_role_switcher"),
+                            color = AmberWarning.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                text = "🛠️ Admin",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AmberWarning,
+                                modifier = Modifier
+                                    .border(1.dp, AmberWarning.copy(alpha = 0.5f), RoundedCornerShape(50))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+
                     Surface(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .clickable { onToggleDark() }
                             .testTag("theme_toggle_button"),
@@ -532,14 +813,14 @@ private fun WbpTopHeader(
                         Box(
                             modifier = Modifier
                                 .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                .padding(8.dp),
+                                .padding(7.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                                 contentDescription = "Toggle Dark/Light Theme",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }

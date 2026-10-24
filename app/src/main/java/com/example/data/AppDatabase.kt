@@ -276,6 +276,48 @@ data class QuestionVaultEntity(
     }
 }
 
+@Entity(tableName = "registered_aspirants")
+data class AspirantUserEntity(
+    @PrimaryKey val email: String,
+    val id: String,
+    val fullName: String,
+    val password: String,
+    val casteCategory: String = AspirantCasteCategory.GENERAL.name,
+    val targetExam: String = AspirantTargetExam.WBP_CONSTABLE.name,
+    val testsAttempted: Int = 0,
+    val averageScore: Double = 0.0,
+    val joinDate: String = "24 Oct 2026",
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toProfile(): AspirantProfile = AspirantProfile(
+        id = id,
+        fullName = fullName,
+        email = email,
+        password = password,
+        casteCategory = casteCategory,
+        targetExam = targetExam,
+        testsAttempted = testsAttempted,
+        averageScore = averageScore,
+        joinDate = joinDate,
+        timestamp = timestamp
+    )
+
+    companion object {
+        fun fromProfile(profile: AspirantProfile): AspirantUserEntity = AspirantUserEntity(
+            email = profile.email.trim().lowercase(),
+            id = profile.id,
+            fullName = profile.fullName.trim(),
+            password = profile.password,
+            casteCategory = profile.casteCategory,
+            targetExam = profile.targetExam,
+            testsAttempted = profile.testsAttempted,
+            averageScore = profile.averageScore,
+            joinDate = profile.joinDate,
+            timestamp = profile.timestamp
+        )
+    }
+}
+
 @Dao
 interface WbpDao {
     @Query("SELECT * FROM syllabus_topics")
@@ -292,6 +334,9 @@ interface WbpDao {
 
     @Query("SELECT * FROM mock_test_results ORDER BY timestamp DESC")
     fun getAllMockResults(): Flow<List<MockTestResultEntity>>
+
+    @Query("SELECT * FROM mock_test_results ORDER BY timestamp DESC")
+    suspend fun getAllMockResultsList(): List<MockTestResultEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMockResult(result: MockTestResultEntity)
@@ -349,6 +394,27 @@ interface WbpDao {
 
     @Query("DELETE FROM question_vault WHERE id = :id")
     suspend fun deleteVaultQuestionById(id: String)
+
+    @Query("SELECT * FROM registered_aspirants ORDER BY timestamp DESC")
+    fun getAllAspirants(): Flow<List<AspirantUserEntity>>
+
+    @Query("SELECT * FROM registered_aspirants ORDER BY timestamp DESC")
+    suspend fun getAllAspirantsList(): List<AspirantUserEntity>
+
+    @Query("SELECT * FROM registered_aspirants WHERE LOWER(email) = LOWER(:email) LIMIT 1")
+    suspend fun getAspirantByEmail(email: String): AspirantUserEntity?
+
+    @Query("SELECT COUNT(*) FROM registered_aspirants")
+    suspend fun getAspirantCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAspirant(user: AspirantUserEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAspirants(users: List<AspirantUserEntity>)
+
+    @Query("DELETE FROM registered_aspirants WHERE LOWER(email) = LOWER(:email)")
+    suspend fun deleteAspirantByEmail(email: String)
 }
 
 @Database(
@@ -358,9 +424,10 @@ interface WbpDao {
         PetRunLogEntity::class,
         ChatMessageEntity::class,
         MistakeNotebookEntity::class,
-        QuestionVaultEntity::class
+        QuestionVaultEntity::class,
+        AspirantUserEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -399,6 +466,7 @@ class WbpRepository(private val dao: WbpDao) {
     val chatMessages: Flow<List<ChatMessageEntity>> = dao.getAllChatMessages()
     val mistakeNotebook: Flow<List<MistakeNotebookEntity>> = dao.getAllMistakeQuestions()
     val questionVaultEntities: Flow<List<QuestionVaultEntity>> = dao.getAllVaultQuestions()
+    val registeredAspirants: Flow<List<AspirantUserEntity>> = dao.getAllAspirants()
 
     suspend fun ensureSeedData() {
         if (dao.getSyllabusCount() == 0) {
@@ -463,6 +531,87 @@ class WbpRepository(private val dao: WbpDao) {
                 }
             dao.insertVaultQuestions(initialQuestions.map { QuestionVaultEntity.fromQuizQuestion(it) })
         }
+        if (dao.getAspirantCount() == 0) {
+            val defaultAspirants = listOf(
+                AspirantUserEntity(
+                    email = "rahul.mondal@gmail.com",
+                    id = "ASP_DEMO_1",
+                    fullName = "Rahul Mondal",
+                    password = "rahul123",
+                    casteCategory = AspirantCasteCategory.OBC_B.name,
+                    targetExam = AspirantTargetExam.WBP_CONSTABLE.name,
+                    testsAttempted = 8,
+                    averageScore = 58.25,
+                    joinDate = "12 Oct 2026",
+                    timestamp = System.currentTimeMillis() - 86_400_000L * 12
+                ),
+                AspirantUserEntity(
+                    email = "ananya.roy@gmail.com",
+                    id = "ASP_DEMO_2",
+                    fullName = "Ananya Roy",
+                    password = "ananya123",
+                    casteCategory = AspirantCasteCategory.GENERAL.name,
+                    targetExam = AspirantTargetExam.WBP_LADY_CONSTABLE.name,
+                    testsAttempted = 11,
+                    averageScore = 62.50,
+                    joinDate = "15 Oct 2026",
+                    timestamp = System.currentTimeMillis() - 86_400_000L * 9
+                ),
+                AspirantUserEntity(
+                    email = "sourav.das@gmail.com",
+                    id = "ASP_DEMO_3",
+                    fullName = "Sourav Das",
+                    password = "sourav123",
+                    casteCategory = AspirantCasteCategory.SC.name,
+                    targetExam = AspirantTargetExam.WBP_KP_SI.name,
+                    testsAttempted = 6,
+                    averageScore = 134.75,
+                    joinDate = "19 Oct 2026",
+                    timestamp = System.currentTimeMillis() - 86_400_000L * 5
+                ),
+                AspirantUserEntity(
+                    email = "pemba.tamang@gmail.com",
+                    id = "ASP_DEMO_4",
+                    fullName = "Pemba Tamang",
+                    password = "pemba123",
+                    casteCategory = AspirantCasteCategory.GORKHA.name,
+                    targetExam = AspirantTargetExam.KP_CONSTABLE.name,
+                    testsAttempted = 5,
+                    averageScore = 53.00,
+                    joinDate = "21 Oct 2026",
+                    timestamp = System.currentTimeMillis() - 86_400_000L * 3
+                )
+            )
+            dao.insertAspirants(defaultAspirants)
+        }
+    }
+
+    suspend fun getAspirantByEmail(email: String): AspirantProfile? =
+        dao.getAspirantByEmail(email.trim().lowercase())?.toProfile()
+
+    suspend fun upsertAspirantProfile(profile: AspirantProfile) {
+        dao.upsertAspirant(AspirantUserEntity.fromProfile(profile))
+    }
+
+    suspend fun deleteAspirantProfile(email: String) {
+        dao.deleteAspirantByEmail(email.trim().lowercase())
+    }
+
+    suspend fun recordAspirantTestScore(email: String, netScore: Double): AspirantProfile? {
+        val current = dao.getAspirantByEmail(email.trim().lowercase()) ?: return null
+        val prevCount = current.testsAttempted.coerceAtLeast(0)
+        val nextCount = prevCount + 1
+        val nextAvg = if (prevCount == 0) {
+            netScore
+        } else {
+            ((current.averageScore * prevCount) + netScore) / nextCount.toDouble()
+        }
+        val updated = current.copy(
+            testsAttempted = nextCount,
+            averageScore = kotlin.math.round(nextAvg * 100.0) / 100.0
+        )
+        dao.upsertAspirant(updated)
+        return updated.toProfile()
     }
 
     /**
@@ -594,11 +743,53 @@ class WbpRepository(private val dao: WbpDao) {
     }
 
     /**
-     * Imports a JSON Backup file (`.json`) into the Question Bank, supporting both full `QuizQuestion`
-     * arrays and flexible JSON question objects.
+     * Exports the Full Unified Database Bundle (`questions`, `users`, and `testAttempts`) as JSON.
+     */
+    suspend fun exportFullDatabaseBundleJson(): String {
+        val allQuestions = dao.getAllVaultQuestionsList().map { it.toQuizQuestion() }
+        val allUsers = dao.getAllAspirantsList().map { it.toProfile() }
+        val allAttempts = dao.getAllMockResultsList().map {
+            TestAttemptRecord(
+                id = it.id,
+                examName = it.examTitle,
+                totalQuestions = it.totalQuestions,
+                attempted = (it.totalQuestions - it.unattemptedCount).coerceAtLeast(0),
+                correct = it.correctCount,
+                wrong = it.wrongCount,
+                netScore = it.netScore,
+                maxMarks = it.maxMarks,
+                accuracyPercent = it.accuracyPercent,
+                timeTakenSeconds = it.timeTakenSeconds,
+                timestamp = it.timestamp
+            )
+        }
+        val bundle = FullDatabaseBackupBundle(
+            schemaVersion = 2,
+            exportedAt = System.currentTimeMillis(),
+            questions = allQuestions,
+            users = allUsers,
+            testAttempts = allAttempts
+        )
+        return backupJsonFormat.encodeToString(FullDatabaseBackupBundle.serializer(), bundle)
+    }
+
+    /**
+     * Imports a JSON Backup file (`.json`) into the Unified Database, supporting both:
+     * 1) `FullDatabaseBackupBundle` (`questions` + `users` + `testAttempts`)
+     * 2) `List<QuizQuestion>` arrays
      */
     suspend fun importDatabaseBackupJson(rawJson: String): ScanVerificationReport {
         val cleaned = rawJson.trim().removePrefix("\uFEFF")
+        if (cleaned.startsWith("{")) {
+            try {
+                val bundle = backupJsonFormat.decodeFromString(FullDatabaseBackupBundle.serializer(), cleaned)
+                if (bundle.users.isNotEmpty()) {
+                    dao.insertAspirants(bundle.users.map { AspirantUserEntity.fromProfile(it) })
+                }
+                return ingestScannedQuestionsWithReport(bundle.questions)
+            } catch (_: Exception) {
+            }
+        }
         val parsedQuestions: List<QuizQuestion> = try {
             backupJsonFormat.decodeFromString(ListSerializer(QuizQuestion.serializer()), cleaned)
         } catch (_: Exception) {
@@ -677,3 +868,4 @@ class WbpRepository(private val dao: WbpDao) {
         dao.deleteMistakeQuestion(questionId)
     }
 }
+

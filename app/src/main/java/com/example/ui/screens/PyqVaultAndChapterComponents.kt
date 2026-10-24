@@ -203,6 +203,7 @@ fun QuestionVaultMasterBar(
     scannerCurrentPage: Int = 0,
     scannerTotalPages: Int = 0,
     scannerAddedCount: Int = 0,
+    isAdmin: Boolean = false,
     onOpenImporterModal: () -> Unit,
     onResetSeenHistory: () -> Unit
 ) {
@@ -289,35 +290,37 @@ fun QuestionVaultMasterBar(
                 }
             }
 
-            // "✍️ Manual Question Studio (Batch 1–50) & 🗂️ Database Manager" Button
-            Button(
-                onClick = onOpenImporterModal,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .testTag("open_pyq_book_importer_button"),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = Color.White
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "✍️ Manual Question Studio (Batch 1–50) & 🗂️ Database Manager",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            // "✍️ Manual Question Studio (Batch 1–50) & 🗂️ Database Manager" Button (Admin Only)
+            if (isAdmin) {
+                Button(
+                    onClick = onOpenImporterModal,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("open_pyq_book_importer_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "✍️ Manual Question Studio (Batch 1–50) & 🗂️ Database Manager",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -2524,13 +2527,14 @@ fun PyqVaultArchiveSection(
     questionVault: List<QuizQuestion>,
     seenQuestionIds: Set<String>,
     bulkGeneratingTarget: String?,
+    isAdmin: Boolean = false,
     onStartExamGroupTest: (WbpExamHistoryGroup, String?) -> Unit,
     onBulkAdd50Questions: (String, String?, String?) -> Unit
 ) {
     val examGroups = WbpPyqVaultSeed.examHistoryGroups
     var selectedExamGroup by remember { mutableStateOf(examGroups.first()) }
     var selectedSubjectFilter by remember { mutableStateOf<String?>(null) }
-    var showPreviewQuestions by remember { mutableStateOf(true) }
+    var showPreviewQuestions by remember { mutableStateOf(false) }
 
     val matchingQuestions = remember(questionVault, selectedExamGroup, selectedSubjectFilter) {
         questionVault.filter { q ->
@@ -2711,52 +2715,56 @@ fun PyqVaultArchiveSection(
                     )
                 }
 
-                val targetSub = selectedSubjectFilter ?: "GK"
-                BulkAdd50VaultButton(
-                    isBn = isBn,
-                    isLoading = bulkGeneratingTarget == targetSub,
-                    testTag = "bulk_add_50_pyq_vault_$targetSub",
-                    onClick = {
-                        onBulkAdd50Questions(targetSub, null, selectedExamGroup.titleEn)
-                    }
-                )
+                if (isAdmin) {
+                    val targetSub = selectedSubjectFilter ?: "GK"
+                    BulkAdd50VaultButton(
+                        isBn = isBn,
+                        isLoading = bulkGeneratingTarget == targetSub,
+                        testTag = "bulk_add_50_pyq_vault_$targetSub",
+                        onClick = {
+                            onBulkAdd50Questions(targetSub, null, selectedExamGroup.titleEn)
+                        }
+                    )
+                }
             }
         }
 
-        // Authentic Extracted PYQs Preview List with Exam Year Badges & Bengali Explanations
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showPreviewQuestions = !showPreviewQuestions }
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (isBn)
-                    "অফিশিয়াল PYQ প্রশ্ন ও বাংলা ব্যাখ্যা (${matchingQuestions.size}টি প্রশ্ন)"
-                else
-                    "AUTHENTIC EXTRACTED PYQS WITH YEAR BADGES (${matchingQuestions.size})",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Icon(
-                imageVector = if (showPreviewQuestions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        // Authentic Extracted PYQs Preview List with Exam Year Badges & Bengali Explanations (Admin Only so students cannot inspect answers before test)
+        if (isAdmin) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showPreviewQuestions = !showPreviewQuestions }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isBn)
+                        "অফিশিয়াল PYQ প্রশ্ন ও বাংলা ব্যাখ্যা (${matchingQuestions.size}টি প্রশ্ন)"
+                    else
+                        "AUTHENTIC EXTRACTED PYQS WITH YEAR BADGES (${matchingQuestions.size})",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = if (showPreviewQuestions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-        AnimatedVisibility(visible = showPreviewQuestions) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                matchingQuestions.take(25).forEachIndexed { idx, q ->
-                    PyqVaultQuestionPreviewCard(
-                        index = idx + 1,
-                        question = q,
-                        isSeen = q.id in seenQuestionIds,
-                        isBn = isBn
-                    )
+            AnimatedVisibility(visible = showPreviewQuestions) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    matchingQuestions.take(25).forEachIndexed { idx, q ->
+                        PyqVaultQuestionPreviewCard(
+                            index = idx + 1,
+                            question = q,
+                            isSeen = q.id in seenQuestionIds,
+                            isBn = isBn
+                        )
+                    }
                 }
             }
         }
@@ -2942,6 +2950,7 @@ fun WbpChapterWiseSection(
     questionVault: List<QuizQuestion>,
     seenQuestionIds: Set<String>,
     bulkGeneratingTarget: String?,
+    isAdmin: Boolean = false,
     onStartChapterTest: (WbpChapterSpec) -> Unit,
     onBulkAdd50ForChapter: (WbpChapterSpec) -> Unit
 ) {
@@ -3118,12 +3127,14 @@ fun WbpChapterWiseSection(
                         }
                     }
 
-                    BulkAdd50VaultButton(
-                        isBn = isBn,
-                        isLoading = bulkGeneratingTarget == chapter.id,
-                        testTag = "bulk_add_50_chapter_${chapter.id}",
-                        onClick = { onBulkAdd50ForChapter(chapter) }
-                    )
+                    if (isAdmin) {
+                        BulkAdd50VaultButton(
+                            isBn = isBn,
+                            isLoading = bulkGeneratingTarget == chapter.id,
+                            testTag = "bulk_add_50_chapter_${chapter.id}",
+                            onClick = { onBulkAdd50ForChapter(chapter) }
+                        )
+                    }
                 }
             }
         }

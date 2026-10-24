@@ -56,6 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppLanguage
+import com.example.data.AspirantProfile
 import com.example.data.CandidateCategory
 import com.example.data.CandidateGender
 import com.example.data.PetRunLogEntity
@@ -69,14 +70,21 @@ import java.util.Locale
 fun PetTrackerScreen(
     language: AppLanguage,
     petRunLogs: List<PetRunLogEntity>,
+    aspirantProfile: AspirantProfile? = null,
     onSaveRun: (String, String, Int, Int, Int, Boolean, String) -> Unit,
     onDeleteRun: (Int) -> Unit
 ) {
     val isBn = language == AppLanguage.BENGALI
 
-    var selectedPost by remember { mutableStateOf(PolicePost.CONSTABLE) }
-    var selectedGender by remember { mutableStateOf(CandidateGender.MALE) }
-    var selectedCategory by remember { mutableStateOf(CandidateCategory.GENERAL) }
+    var selectedPost by remember(aspirantProfile?.targetExam) {
+        mutableStateOf(aspirantProfile?.resolvedTargetExam?.policePost ?: PolicePost.CONSTABLE)
+    }
+    var selectedGender by remember(aspirantProfile?.targetExam) {
+        mutableStateOf(aspirantProfile?.resolvedTargetExam?.defaultGender ?: CandidateGender.MALE)
+    }
+    var selectedCategory by remember(aspirantProfile?.casteCategory) {
+        mutableStateOf(aspirantProfile?.resolvedCasteCategory?.toCandidateCategory() ?: CandidateCategory.GENERAL)
+    }
 
     // PMT Input States
     var heightInput by remember { mutableStateOf("168") }

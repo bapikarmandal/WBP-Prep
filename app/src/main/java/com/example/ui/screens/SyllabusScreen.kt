@@ -99,6 +99,7 @@ fun SyllabusScreen(
     questionVault: List<QuizQuestion> = emptyList(),
     seenQuestionIds: Set<String> = emptySet(),
     bulkGeneratingTarget: String? = null,
+    isAdmin: Boolean = false,
     onStartChapterTest: (WbpChapterInfo) -> Unit = {},
     onBulkAdd50ForChapter: (WbpChapterInfo) -> Unit = {}
 ) {
@@ -302,6 +303,7 @@ fun SyllabusScreen(
                 questionVault = questionVault,
                 seenQuestionIds = seenQuestionIds,
                 bulkGeneratingTarget = bulkGeneratingTarget,
+                isAdmin = isAdmin,
                 onSelectSubject = { sub ->
                     selectedStudySubject = sub
                     expandedChapterId = WbpPyqVaultSeed.getChaptersForSubject(sub).firstOrNull()?.chapterId
@@ -902,6 +904,7 @@ private fun ChapterWiseStudyHubSection(
     questionVault: List<QuizQuestion>,
     seenQuestionIds: Set<String>,
     bulkGeneratingTarget: String?,
+    isAdmin: Boolean = false,
     onSelectSubject: (String) -> Unit,
     onToggleChapterExpand: (String) -> Unit,
     onStartChapterTest: (WbpChapterInfo) -> Unit,
@@ -1270,12 +1273,14 @@ private fun ChapterWiseStudyHubSection(
                                                 )
                                             }
 
-                                            BulkAdd50VaultButton(
-                                                isBn = isBn,
-                                                isLoading = bulkGeneratingTarget == chapter.chapterId,
-                                                testTag = "syllabus_bulk_add_50_${chapter.chapterId}",
-                                                onClick = { onBulkAdd50ForChapter(chapter) }
-                                            )
+                                            if (isAdmin) {
+                                                BulkAdd50VaultButton(
+                                                    isBn = isBn,
+                                                    isLoading = bulkGeneratingTarget == chapter.chapterId,
+                                                    testTag = "syllabus_bulk_add_50_${chapter.chapterId}",
+                                                    onClick = { onBulkAdd50ForChapter(chapter) }
+                                                )
+                                            }
                                         }
                                     }
                                 }

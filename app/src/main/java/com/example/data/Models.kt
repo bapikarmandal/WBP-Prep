@@ -355,12 +355,12 @@ enum class QuestionPaletteStatus {
 
 enum class TestSeriesFilter(val id: String, val labelEn: String, val labelBn: String) {
     ALL("ALL", "All Tests", "All Tests"),
-    MY_UPLOADED("MY_UPLOADED", "🗂️ Manage Question Database", "🗂️ Manage Question Database"),
-    FULL_MOCK("FULL_MOCK", "Full Mock (85M)", "Full Mock (85M)"),
-    SUBJECT_WISE("SUBJECT_WISE", "Subject-Wise", "Subject-Wise"),
-    PYQ_VAULT("PYQ_VAULT", "PYQ Vault (2005–Present)", "PYQ Vault (2005–Present)"),
-    CHAPTER_WISE("CHAPTER_WISE", "Chapter-Wise Practice", "Chapter-Wise Practice"),
-    MISTAKE_RETRY("MISTAKE_RETRY", "Mistake Retry", "Mistake Retry")
+    FULL_MOCK("FULL_MOCK", "Full Length Mocks (85M)", "Full Length Mocks (85M)"),
+    SUBJECT_WISE("SUBJECT_WISE", "Subject Sectional Tests", "Subject Sectional Tests"),
+    CHAPTER_WISE("CHAPTER_WISE", "Chapter-Wise Tests", "Chapter-Wise Tests"),
+    PYQ_VAULT("PYQ_VAULT", "PYQ Papers (2005–2024)", "PYQ Papers (2005–2024)"),
+    MISTAKE_RETRY("MISTAKE_RETRY", "Mistake Notebook Retry", "Mistake Notebook Retry"),
+    MY_UPLOADED("MY_UPLOADED", "🗂️ Manage Question Database", "🗂️ Manage Question Database")
 }
 
 data class TestSeriesItem(
@@ -395,6 +395,174 @@ enum class PolicePost(val labelEn: String, val labelBn: String) {
     CONSTABLE("WBP / KP Constable", "কনস্টেবল (WBP / KP)"),
     SI("WBP / KP Sub-Inspector (SI)", "সাব-ইন্সপেক্টর (SI)")
 }
+
+/**
+ * Role-Based Access Control (RBAC) Roles:
+ * - UNAUTHENTICATED: Must log in via Dual-Mode Authentication Screen
+ * - ASPIRANT: Student mode (Question creation, edit/delete, and DB tools strictly hidden; auto-personalized by Profile)
+ * - ADMIN: Full Admin Mode (Unlocks 🛠️ Admin Panel, 1–50 Batch Studio, Question Explorer, Aspirants Directory, Cloud DB Sync)
+ */
+enum class UserRole {
+    UNAUTHENTICATED,
+    ASPIRANT,
+    ADMIN
+}
+
+/**
+ * Aspirant Caste / Category options from Sign-Up:
+ * `General (UR)`, `OBC-A`, `OBC-B`, `SC`, `ST`, `Gorkha / Garhwali / Rajbanshi`
+ */
+enum class AspirantCasteCategory(
+    val displayLabel: String,
+    val shortBadge: String,
+    val safeCutoffOutOf85: Double,
+    val isRelaxedHillSt: Boolean
+) {
+    GENERAL("General (UR)", "UR", 54.5, false),
+    OBC_A("OBC-A", "OBC-A", 46.5, false),
+    OBC_B("OBC-B", "OBC-B", 51.0, false),
+    SC("SC", "SC", 47.0, false),
+    ST("ST", "ST", 41.5, true),
+    GORKHA("Gorkha / Garhwali / Rajbanshi", "Gorkha/Hill", 43.0, true);
+
+    fun toCandidateCategory(): CandidateCategory = when (this) {
+        GENERAL -> CandidateCategory.GENERAL
+        OBC_A, OBC_B -> CandidateCategory.OBC
+        SC -> CandidateCategory.SC
+        ST -> CandidateCategory.ST
+        GORKHA -> CandidateCategory.GORKHA
+    }
+
+    companion object {
+        fun fromNameOrLabel(value: String): AspirantCasteCategory {
+            val trimmed = value.trim()
+            return entries.firstOrNull {
+                it.name.equals(trimmed, ignoreCase = true) ||
+                    it.displayLabel.equals(trimmed, ignoreCase = true) ||
+                    it.shortBadge.equals(trimmed, ignoreCase = true)
+            } ?: GENERAL
+        }
+    }
+}
+
+/**
+ * Aspirant Target Exam options from Sign-Up:
+ * `WBP Constable (85 Marks)`, `KP Constable (85 Marks)`, `WBP/KP Sub-Inspector (SI - 200 Marks)`, `WBP Lady Constable (85 Marks)`
+ */
+enum class AspirantTargetExam(
+    val displayLabel: String,
+    val shortBadge: String,
+    val examType: ExamType,
+    val policePost: PolicePost,
+    val defaultGender: CandidateGender
+) {
+    WBP_CONSTABLE(
+        displayLabel = "WBP Constable (85 Marks)",
+        shortBadge = "WBP Constable (85M)",
+        examType = ExamType.CONSTABLE,
+        policePost = PolicePost.CONSTABLE,
+        defaultGender = CandidateGender.MALE
+    ),
+    KP_CONSTABLE(
+        displayLabel = "KP Constable (85 Marks)",
+        shortBadge = "KP Constable (85M)",
+        examType = ExamType.CONSTABLE,
+        policePost = PolicePost.CONSTABLE,
+        defaultGender = CandidateGender.MALE
+    ),
+    WBP_KP_SI(
+        displayLabel = "WBP/KP Sub-Inspector (SI - 200 Marks)",
+        shortBadge = "WBP/KP SI (200M)",
+        examType = ExamType.SI_PRELIMS,
+        policePost = PolicePost.SI,
+        defaultGender = CandidateGender.MALE
+    ),
+    WBP_LADY_CONSTABLE(
+        displayLabel = "WBP Lady Constable (85 Marks)",
+        shortBadge = "WBP Lady Constable (85M)",
+        examType = ExamType.CONSTABLE,
+        policePost = PolicePost.CONSTABLE,
+        defaultGender = CandidateGender.FEMALE
+    );
+
+    companion object {
+        fun fromNameOrLabel(value: String): AspirantTargetExam {
+            val trimmed = value.trim()
+            return entries.firstOrNull {
+                it.name.equals(trimmed, ignoreCase = true) ||
+                    it.displayLabel.equals(trimmed, ignoreCase = true) ||
+                    it.shortBadge.equals(trimmed, ignoreCase = true)
+            } ?: WBP_CONSTABLE
+        }
+    }
+}
+
+@Serializable
+data class AspirantProfile(
+    val id: String,
+    val fullName: String,
+    val email: String,
+    val password: String,
+    val casteCategory: String = AspirantCasteCategory.GENERAL.name,
+    val targetExam: String = AspirantTargetExam.WBP_CONSTABLE.name,
+    val testsAttempted: Int = 0,
+    val averageScore: Double = 0.0,
+    val joinDate: String = "24 Oct 2026",
+    val joinTimestamp: Long = System.currentTimeMillis(),
+    val timestamp: Long = joinTimestamp
+) {
+    val resolvedCasteCategory: AspirantCasteCategory
+        get() = AspirantCasteCategory.fromNameOrLabel(casteCategory)
+
+    val resolvedTargetExam: AspirantTargetExam
+        get() = AspirantTargetExam.fromNameOrLabel(targetExam)
+}
+
+@Serializable
+data class TestAttemptRecord(
+    val id: Int = 0,
+    val examName: String,
+    val totalQuestions: Int,
+    val attempted: Int,
+    val correct: Int,
+    val wrong: Int,
+    val netScore: Double,
+    val maxMarks: Double,
+    val accuracyPercent: Int,
+    val timeTakenSeconds: Int,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class CloudDbConfig(
+    val isEnabled: Boolean = true,
+    val provider: String = "FIREBASE_FIRESTORE", // "LOCAL_ONLY", "FIREBASE_FIRESTORE", "SUPABASE"
+    val projectUrlOrId: String = "wbp-prep",
+    val apiKeyOrToken: String = "",
+    val firebaseConfigJson: String = "",
+    val supabaseUrl: String = "",
+    val supabaseAnonKey: String = "",
+    val autoSyncEnabled: Boolean = true,
+    val lastSyncStatus: String = "Firebase Firestore Provisioned & Active (Ready)",
+    val lastSyncedAt: String = "",
+    val lastSyncedTimestamp: Long = System.currentTimeMillis()
+) {
+    val isCloudConfigured: Boolean
+        get() = isEnabled ||
+            (provider.contains("FIREBASE", ignoreCase = true) && (firebaseConfigJson.isNotBlank() || projectUrlOrId.isNotBlank())) ||
+            (provider == "SUPABASE" && supabaseUrl.isNotBlank() && supabaseAnonKey.isNotBlank()) ||
+            firebaseConfigJson.isNotBlank() ||
+            (supabaseUrl.isNotBlank() && supabaseAnonKey.isNotBlank())
+}
+
+@Serializable
+data class FullDatabaseBackupBundle(
+    val schemaVersion: Int = 2,
+    val exportedAt: Long = System.currentTimeMillis(),
+    val questions: List<QuizQuestion> = emptyList(),
+    val users: List<AspirantProfile> = emptyList(),
+    val testAttempts: List<TestAttemptRecord> = emptyList()
+)
 
 object WbpSampleData {
     val defaultSyllabusTopics = listOf(
